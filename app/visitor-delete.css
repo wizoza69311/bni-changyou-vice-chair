@@ -1,0 +1,1 @@
+.visitor-head{grid-template-columns:22px 1fr auto}.visitor-delete{align-self:start;padding:6px 9px;color:#a21d2d;background:#fff;border:1px solid #e2b4b8;border-radius:5px;font-size:11px;cursor:pointer}.visitor-delete:hover{background:#fff0f1}@media(max-width:520px){.visitor-delete{padding:7px 10px}}

@@ -1,0 +1,44 @@
+# Dependencies and build output
+node_modules/
+dist/
+.next/
+.vinext/
+.wrangler/
+coverage/
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.*
+credentials.*
+
+# Local databases and runtime state
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.dev.vars
+
+# Imported BNI/PALMS data and deployment packages
+palms-records.json
+palms-active-records.json
+*palms-export*
+site-package.tgz
+*.tgz
+
+# Logs, caches and editor files
+*.log
+.eslintcache
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+

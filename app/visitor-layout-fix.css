@@ -1,0 +1,1 @@
+.visitor-note{grid-column:1/-1;grid-template-columns:minmax(0,1fr) 96px;gap:8px}.visitor-note input{min-width:0;font-size:13px}.visitor-note button{white-space:nowrap}@media(max-width:520px){.visitor-note{grid-column:auto;grid-template-columns:1fr}.visitor-note>span{grid-column:auto}.visitor-note button{min-height:40px}}

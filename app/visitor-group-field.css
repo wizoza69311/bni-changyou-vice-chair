@@ -1,0 +1,1 @@
+.visitor-fields{grid-template-columns:repeat(6,minmax(100px,1fr))}@media(max-width:1100px){.visitor-fields{grid-template-columns:1fr 1fr}}@media(max-width:720px){.visitor-fields{grid-template-columns:1fr}}

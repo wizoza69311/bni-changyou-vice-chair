@@ -1,0 +1,523 @@
+/** Cloudflare Worker entry point for the vinext-starter template. */
+import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
+import handler from "vinext/server/app-router-entry";
+
+interface Env {
+  ASSETS: Fetcher;
+  DB: D1Database;
+  ADMIN_EMAIL?: string;
+  GROUPS_API_KEY?: string;
+  GROUPS_READ_API_KEY?: string;
+  BNI_TOKEN_ENCRYPTION_KEY?: string;
+  ZOOM_ACCOUNT_ID?: string;
+  ZOOM_CLIENT_ID?: string;
+  ZOOM_CLIENT_SECRET?: string;
+  OPENAI_API_KEY?: string;
+  IMAGES: {
+    input(stream: ReadableStream): {
+      transform(options: Record<string, unknown>): {
+        output(options: { format: string; quality: number }): Promise<{ response(): Response }>;
+      };
+    };
+  };
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
+let localZoomCredentials: { accountId:string; clientId:string; clientSecret:string } | null = null;
+let localOpenAIKey: string | null = null;
+
+// Image security config. SVG sources with .svg extension auto-skip the
+// optimization endpoint on the client side (served directly, no proxy).
+// To route SVGs through the optimizer (with security headers), set
+// dangerouslyAllowSVG: true in next.config.js and uncomment below:
+// const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
+
+const worker = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    const apiJson = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+
+    if(url.pathname.startsWith("/api/v1/groups")||url.pathname.startsWith("/api/v1/members/")){
+      const corsHeaders={"content-type":"application/json; charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","access-control-allow-headers":"authorization, content-type, if-match","access-control-allow-methods":"GET, PUT, OPTIONS"};
+      const v1Json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:corsHeaders});
+      if(request.method==="OPTIONS")return new Response(null,{status:204,headers:corsHeaders});
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      const isOwner=Boolean(email&&admin&&email===admin),hasFullKey=Boolean(env.GROUPS_API_KEY&&bearer===env.GROUPS_API_KEY),hasReadKey=Boolean(env.GROUPS_READ_API_KEY&&bearer===env.GROUPS_READ_API_KEY),authorized=isOwner||hasFullKey||hasReadKey;
+      if(!env.GROUPS_API_KEY&&!env.GROUPS_READ_API_KEY&&!email)return v1Json({error:"分組 API 尚未啟用"},503);
+      if(!authorized)return v1Json({error:"API Key 無效或未提供"},401);
+      if(!env.DB)return v1Json({error:"分組資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_group_state (id INTEGER PRIMARY KEY CHECK (id=1), groups TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const current=await env.DB.prepare(`SELECT groups,updated_at AS updatedAt FROM member_group_state WHERE id=1`).first<{groups:string;updatedAt:string}>(),groups=JSON.parse(current?.groups||"[]") as Array<{id:number;members:Array<{name:string;role:string}>}>;
+      const groupIdMatch=url.pathname.match(/^\/api\/v1\/groups\/(\d+)$/),memberMatch=url.pathname.match(/^\/api\/v1\/members\/([^/]+)\/group$/);
+      if(request.method==="GET"&&url.pathname==="/api/v1/groups")return v1Json({data:groups,meta:{count:groups.length,updatedAt:current?.updatedAt||null}});
+      if(request.method==="GET"&&groupIdMatch){const group=groups.find(item=>item.id===Number(groupIdMatch[1]));return group?v1Json({data:group,meta:{updatedAt:current?.updatedAt||null}}):v1Json({error:"找不到組別"},404)}
+      if(request.method==="GET"&&memberMatch){const name=decodeURIComponent(memberMatch[1]).replace(/\s+/g,"");const group=groups.find(item=>item.members.some(member=>member.name.replace(/\s+/g,"")===name));if(!group)return v1Json({error:"找不到會員分組"},404);const member=group.members.find(item=>item.name.replace(/\s+/g,"")===name);return v1Json({data:{member:member?.name,role:member?.role,groupId:group.id,committee:group.members.find(item=>item.role==="委員")?.name||"",leader:group.members.find(item=>item.role==="小組長")?.name||""},meta:{updatedAt:current?.updatedAt||null}})}
+      if(request.method==="PUT"&&url.pathname==="/api/v1/groups"){
+        if(!isOwner&&!hasFullKey)return v1Json({error:"此 API Key 僅有讀取權限"},403);
+        const body=await request.json() as Record<string,unknown>,next=Array.isArray(body.groups)?body.groups as Array<{id:number;members:Array<{name:string;role:string}>}>:[],baseUpdatedAt=String(request.headers.get("if-match")||body.baseUpdatedAt||"").replace(/^W\//,"").replaceAll('"',"");
+        if(baseUpdatedAt&&current?.updatedAt&&baseUpdatedAt!==current.updatedAt)return v1Json({error:"分組資料已被更新",data:groups,meta:{updatedAt:current.updatedAt}},409);
+        const roles=new Set(["十長","委員","導師","小組長","組員"]),ids=next.map(group=>Number(group.id)),members=next.flatMap(group=>Array.isArray(group.members)?group.members:[]),names=members.map(member=>String(member.name||"").trim()).filter(Boolean);
+        if(next.length!==12||new Set(ids).size!==12||ids.some(id=>id<1||id>12))return v1Json({error:"分組必須包含編號 1 至 12，且不得重複"},400);
+        if(members.some(member=>!String(member.name||"").trim()||!roles.has(String(member.role))))return v1Json({error:"會員姓名或角色格式不正確"},400);
+        if(new Set(names.map(name=>name.replace(/\s+/g,""))).size!==names.length)return v1Json({error:"同一會員不可出現在兩個位置"},400);
+        if(next.some(group=>["十長","委員","導師","小組長"].some(role=>group.members.filter(member=>member.role===role).length>1)))return v1Json({error:"每組的十長、委員、導師與小組長各限一位"},400);
+        const updatedAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO member_group_state (id,groups,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET groups=excluded.groups,updated_at=excluded.updated_at`).bind(JSON.stringify(next),updatedAt).run();return v1Json({data:next,meta:{updatedAt}});
+      }
+      return v1Json({error:"不支援的 API 操作"},405);
+    }
+
+    if (url.pathname === "/api/admin-status" && request.method === "GET") {
+      const email = (request.headers.get("oai-authenticated-user-email") || "").trim().toLowerCase();
+      const adminEmail = (env.ADMIN_EMAIL || "").trim().toLowerCase();
+      return apiJson({ authenticated: Boolean(email), isOwner: Boolean(email && adminEmail && email === adminEmail) });
+    }
+
+    if(url.pathname==="/api/bni-connect/session"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以設定 BNI Connect"},403);
+      if(!env.DB||!env.BNI_TOKEN_ENCRYPTION_KEY)return apiJson({error:"BNI Connect 安全儲存尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_connect_session (id INTEGER PRIMARY KEY CHECK (id=1), encrypted_session TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      if(request.method==="GET"){
+        const row=await env.DB.prepare(`SELECT updated_at AS updatedAt FROM bni_connect_session WHERE id=1`).first<{updatedAt:string}>();
+        return apiJson({connected:Boolean(row),updatedAt:row?.updatedAt||null});
+      }
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,accessToken=String(body.accessToken||"").trim(),refreshToken=String(body.refreshToken||"").trim();
+        if(accessToken.length<20||refreshToken.length<20)return apiJson({error:"Access Token 或 Refresh Token 格式不完整"},400);
+        const keyBytes=Uint8Array.from(atob(env.BNI_TOKEN_ENCRYPTION_KEY),char=>char.charCodeAt(0)),key=await crypto.subtle.importKey("raw",keyBytes,{name:"AES-GCM"},false,["encrypt"]),iv=crypto.getRandomValues(new Uint8Array(12)),plain=new TextEncoder().encode(JSON.stringify({accessToken,refreshToken})),cipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,plain)),encryptedSession=`${btoa(String.fromCharCode(...iv))}.${btoa(String.fromCharCode(...cipher))}`,updatedAt=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO bni_connect_session (id,encrypted_session,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET encrypted_session=excluded.encrypted_session,updated_at=excluded.updated_at`).bind(encryptedSession,updatedAt).run();
+        return apiJson({connected:true,updatedAt});
+      }
+      return apiJson({error:"不支援的操作"},405);
+    }
+
+    if(url.pathname==="/api/bni-connect/test"&&request.method==="POST"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以測試 BNI Connect"},403);
+      if(!env.DB||!env.BNI_TOKEN_ENCRYPTION_KEY)return apiJson({error:"BNI Connect 安全儲存尚未啟用"},503);
+      const row=await env.DB.prepare(`SELECT encrypted_session AS encryptedSession FROM bni_connect_session WHERE id=1`).first<{encryptedSession:string}>();
+      if(!row?.encryptedSession)return apiJson({error:"尚未儲存 BNI Connect Token"},404);
+      try{
+        const [ivText,cipherText]=row.encryptedSession.split("."),keyBytes=Uint8Array.from(atob(env.BNI_TOKEN_ENCRYPTION_KEY),char=>char.charCodeAt(0)),key=await crypto.subtle.importKey("raw",keyBytes,{name:"AES-GCM"},false,["decrypt"]),iv=Uint8Array.from(atob(ivText),char=>char.charCodeAt(0)),cipher=Uint8Array.from(atob(cipherText),char=>char.charCodeAt(0)),plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,cipher),session=JSON.parse(new TextDecoder().decode(plain)) as {accessToken:string;refreshToken:string};
+        const bniHeaders={authorization:`Bearer ${session.accessToken}`,accept:"application/json, text/plain, */*","content-type":"application/json",origin:"https://www.bniconnectglobal.com",referer:"https://www.bniconnectglobal.com/","accept-language":"zh-TW,zh;q=0.9,en;q=0.8"};
+        const checks=[{name:"profile",url:"https://api.bniconnectglobal.com/core-api/profile"},{name:"home",url:"https://api.bniconnectglobal.com/member-api/v2/home"},{name:"nav-menu",url:"https://api.bniconnectglobal.com/member-api/v2/nav-menu"}];
+        let verified:{name:string;data:Record<string,unknown>}|null=null;const statuses:Array<{name:string;status:number}>=[];
+        for(const check of checks){const response=await fetch(check.url,{headers:bniHeaders});statuses.push({name:check.name,status:response.status});if(response.status===401)return apiJson({connected:false,error:"BNI Token 已過期，請重新連接"},401);if(response.ok){verified={name:check.name,data:await response.json() as Record<string,unknown>};break}}
+        if(!verified){const allForbidden=statuses.length>0&&statuses.every(item=>item.status===403);return apiJson({connected:false,error:allForbidden?"BNI Connect 拒絕伺服器直連（403）；Token 已收到，但需改用瀏覽器登入工作階段同步":"BNI Connect 驗證失敗",checks:statuses},502)}
+        const profile=verified.data,updatedAt=new Date().toISOString();
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_connect_profile (id INTEGER PRIMARY KEY CHECK (id=1), profile TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+        await env.DB.prepare(`INSERT INTO bni_connect_profile (id,profile,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET profile=excluded.profile,updated_at=excluded.updated_at`).bind(JSON.stringify(profile),updatedAt).run();
+        return apiJson({connected:true,updatedAt,verifiedBy:verified.name});
+      }catch{return apiJson({connected:false,error:"無法解密或驗證 BNI Connect Token"},500)}
+    }
+
+    if(url.pathname==="/api/bni-sync/pair"&&request.method==="POST"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以建立同步金鑰"},403);
+      if(!env.DB)return apiJson({error:"資料庫尚未啟用"},503);
+      const bytes=crypto.getRandomValues(new Uint8Array(32)),syncKey=`bni_sync_${Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("")}`,digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(syncKey))),b=>b.toString(16).padStart(2,"0")).join(""),updatedAt=new Date().toISOString();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`INSERT INTO bni_sync_credential (id,key_hash,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET key_hash=excluded.key_hash,updated_at=excluded.updated_at`).bind(digest,updatedAt).run();
+      return apiJson({syncKey,updatedAt});
+    }
+
+    if(url.pathname==="/api/v1/bni-sync"){
+      const cors={"content-type":"application/json; charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","access-control-allow-headers":"authorization, content-type","access-control-allow-methods":"POST, OPTIONS"};
+      const respond=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:cors});
+      if(request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+      if(request.method!=="POST")return respond({error:"只接受同步上傳"},405);
+      if(!env.DB)return respond({error:"資料庫尚未啟用"},503);
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(bearer))),b=>b.toString(16).padStart(2,"0")).join("");
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>();
+      if(!bearer||!credential?.keyHash||digest!==credential.keyHash)return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
+      const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[];
+      const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code))).map((x:any)=>({member:String(x.member).trim(),date:String(x.date),code:String(x.code)}));
+      if(valid.length<1)return respond({error:"沒有可匯入的 PALMS 紀錄"},400);
+      const unique=Array.from(new Map(valid.map(item=>[`${item.member}|${item.date}`,item])).values()),now=new Date().toISOString();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(unique),now).run();
+      return respond({ok:true,count:unique.length,updatedAt:now});
+    }
+
+    if(url.pathname==="/api-docs/groups"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return new Response("此頁面僅限系統擁有者",{status:403,headers:{"content-type":"text/plain; charset=utf-8"}});
+    }
+
+    if (url.pathname === "/api/practice") {
+      if (!env.DB) return apiJson({ error: "實習資料庫尚未啟用" }, 503);
+      await env.DB.batch([
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS practice_state (id INTEGER PRIMARY KEY CHECK (id = 1), renewals TEXT NOT NULL DEFAULT '[]', tasks TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS visitor_state (id INTEGER PRIMARY KEY CHECK (id = 1), visitors TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`),
+      ]);
+      if (request.method === "GET") {
+        const row = await env.DB.prepare(`SELECT renewals, tasks, updated_at AS updatedAt FROM practice_state WHERE id = 1`).first<{renewals:string;tasks:string;updatedAt:string}>();
+        const visitorRow=await env.DB.prepare(`SELECT visitors, updated_at AS updatedAt FROM visitor_state WHERE id = 1`).first<{visitors:string;updatedAt:string}>();
+        const latestUpdatedAt=[row?.updatedAt,visitorRow?.updatedAt].filter(Boolean).sort().at(-1)||null;
+        return apiJson(row ? { renewals:JSON.parse(row.renewals), tasks:JSON.parse(row.tasks), visitors:JSON.parse(visitorRow?.visitors||"[]"), updatedAt:latestUpdatedAt } : { renewals:[], tasks:[], visitors:JSON.parse(visitorRow?.visitors||"[]"),updatedAt:latestUpdatedAt });
+      }
+      if (request.method === "POST") {
+        const body = await request.json() as Record<string, unknown>;
+        if(body.entity==="renewal"||body.entity==="visitor"||body.entity==="task"){
+          const entity=String(body.entity),operation=String(body.operation||"update"),id=Number(body.id),changes=(body.changes&&typeof body.changes==="object"?body.changes:{}) as Record<string,unknown>;
+          if(!Number.isFinite(id))return apiJson({error:"資料編號不正確"},400);
+          const updatedAt=new Date().toISOString();
+          if(entity==="renewal"){
+            const current=await env.DB.prepare(`SELECT renewals FROM practice_state WHERE id=1`).first<{renewals:string}>();
+            const records=JSON.parse(current?.renewals||"[]") as Array<Record<string,unknown>>;
+            const currentItem=records.find(item=>Number(item.id)===id),baseUpdatedAt=String(body.baseUpdatedAt||"");
+            if(operation==="update"&&baseUpdatedAt&&currentItem?.updatedAt&&String(currentItem.updatedAt)!==baseUpdatedAt)return apiJson({error:"資料已被其他人更新",renewals:records},409);
+            const next=operation==="delete"?records.filter(item=>Number(item.id)!==id):records.map(item=>Number(item.id)===id?{...item,...changes,updatedAt}:item);
+            await env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,?,'[]',?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals,updated_at=excluded.updated_at`).bind(JSON.stringify(next),updatedAt).run();
+            return apiJson({ok:true,renewals:next,updatedAt});
+          }
+          if(entity==="task"){
+            const current=await env.DB.prepare(`SELECT tasks FROM practice_state WHERE id=1`).first<{tasks:string}>();
+            const records=JSON.parse(current?.tasks||"[]") as Array<Record<string,unknown>>;
+            const currentItem=records.find(item=>Number(item.id)===id),baseUpdatedAt=String(body.baseUpdatedAt||"");
+            if(operation==="update"&&baseUpdatedAt&&currentItem?.updatedAt&&String(currentItem.updatedAt)!==baseUpdatedAt)return apiJson({error:"資料已被其他人更新",tasks:records},409);
+            const next=operation==="delete"?records.filter(item=>Number(item.id)!==id):operation==="create"?[...records,{...changes,updatedAt}]:records.map(item=>Number(item.id)===id?{...item,...changes,updatedAt}:item);
+            await env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,'[]',?,?) ON CONFLICT(id) DO UPDATE SET tasks=excluded.tasks,updated_at=excluded.updated_at`).bind(JSON.stringify(next),updatedAt).run();
+            return apiJson({ok:true,tasks:next,updatedAt});
+          }
+          const current=await env.DB.prepare(`SELECT visitors FROM visitor_state WHERE id=1`).first<{visitors:string}>();
+          const records=JSON.parse(current?.visitors||"[]") as Array<Record<string,unknown>>;
+          const additions=operation==="add_many"&&Array.isArray(changes.records)?changes.records as Array<Record<string,unknown>>:[];
+          const currentItem=records.find(item=>Number(item.id)===id),baseUpdatedAt=String(body.baseUpdatedAt||"");
+          if(operation==="update"&&baseUpdatedAt&&currentItem?.updatedAt&&String(currentItem.updatedAt)!==baseUpdatedAt)return apiJson({error:"資料已被其他人更新",visitors:records},409);
+          const next=operation==="delete"?records.filter(item=>Number(item.id)!==id):operation==="create"?[...records,{...changes,updatedAt}]:operation==="add_many"?[...records,...additions.filter(item=>!records.some(existing=>Number(existing.id)===Number(item.id))).map(item=>({...item,updatedAt}))]:records.map(item=>Number(item.id)===id?{...item,...changes,updatedAt}:item);
+          await env.DB.prepare(`INSERT INTO visitor_state (id,visitors,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET visitors=excluded.visitors,updated_at=excluded.updated_at`).bind(JSON.stringify(next),updatedAt).run();
+          return apiJson({ok:true,visitors:next,updatedAt});
+        }
+        const renewals = Array.isArray(body.renewals) ? body.renewals : [];
+        const tasks = Array.isArray(body.tasks) ? body.tasks : [];
+        const visitors = Array.isArray(body.visitors) ? body.visitors : [];
+        const updatedAt = new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO practice_state (id, renewals, tasks, updated_at) VALUES (1, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals, tasks=excluded.tasks, updated_at=excluded.updated_at`).bind(JSON.stringify(renewals), JSON.stringify(tasks), updatedAt).run();
+        await env.DB.prepare(`INSERT INTO visitor_state (id, visitors, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET visitors=excluded.visitors, updated_at=excluded.updated_at`).bind(JSON.stringify(visitors),updatedAt).run();
+        return apiJson({ ok:true, updatedAt });
+      }
+      return apiJson({ error:"不支援的實習資料操作" }, 405);
+    }
+
+    if(url.pathname==="/api/member-care-owners"&&request.method==="GET"){
+      if(!env.DB)return apiJson({assignments:[]});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_group_state (id INTEGER PRIMARY KEY CHECK (id=1), groups TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const current=await env.DB.prepare(`SELECT groups,updated_at AS updatedAt FROM member_group_state WHERE id=1`).first<{groups:string;updatedAt:string}>();
+      const groups=JSON.parse(current?.groups||"[]") as Array<{id:number;members:Array<{name:string;role:string}>}>;
+      const assignments=groups.flatMap(group=>{const committee=group.members.find(member=>member.role==="委員")?.name||"",leader=group.members.find(member=>member.role==="小組長")?.name||"";return group.members.map(member=>({member:member.name,groupId:group.id,committee,leader}))});
+      return apiJson({assignments,updatedAt:current?.updatedAt||null});
+    }
+
+    if(url.pathname==="/api/member-groups"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase();
+      const adminEmail=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!adminEmail||email!==adminEmail)return apiJson({error:"此功能僅限系統管理員"},403);
+      if(!env.DB)return apiJson({error:"分組資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_group_state (id INTEGER PRIMARY KEY CHECK (id=1), groups TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const current=await env.DB.prepare(`SELECT groups,updated_at AS updatedAt FROM member_group_state WHERE id=1`).first<{groups:string;updatedAt:string}>();
+      if(request.method==="GET")return apiJson({groups:JSON.parse(current?.groups||"[]"),updatedAt:current?.updatedAt||null});
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,groups=Array.isArray(body.groups)?body.groups:[];
+        if(groups.length!==12)return apiJson({error:"分組必須固定為 12 組"},400);
+        const updatedAt=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO member_group_state (id,groups,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET groups=excluded.groups,updated_at=excluded.updated_at`).bind(JSON.stringify(groups),updatedAt).run();
+        return apiJson({ok:true,groups,updatedAt});
+      }
+      return apiJson({error:"不支援的分組資料操作"},405);
+    }
+
+    if(url.pathname==="/api/quality-cases"){
+      if(!env.DB)return apiJson({error:"品保資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS quality_state (id INTEGER PRIMARY KEY CHECK (id=1), cases TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const current=await env.DB.prepare(`SELECT cases FROM quality_state WHERE id=1`).first<{cases:string}>();
+      const cases=JSON.parse(current?.cases||"[]") as Array<Record<string,unknown>>;
+      if(request.method==="GET")return apiJson({cases});
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,id=Number(body.id);
+        if(!Number.isFinite(id))return apiJson({error:"品保案件編號不正確"},400);
+        const currentItem=cases.find(item=>Number(item.id)===id),baseUpdatedAt=String(body.baseUpdatedAt||"");
+        if(currentItem&&baseUpdatedAt&&currentItem.updatedAt&&String(currentItem.updatedAt)!==baseUpdatedAt)return apiJson({error:"案件已被其他人更新",cases},409);
+        const {baseUpdatedAt:_ignored,...updates}=body,existing=Boolean(currentItem);
+        const next=existing?cases.map(item=>Number(item.id)===id?{...item,...updates,updatedAt:new Date().toISOString()}:item):[{...updates,id,updatedAt:new Date().toISOString()},...cases];
+        const now=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO quality_state (id,cases,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET cases=excluded.cases,updated_at=excluded.updated_at`).bind(JSON.stringify(next),now).run();
+        return apiJson({ok:true,cases:next,updatedAt:now});
+      }
+      if(request.method==="DELETE"){
+        const id=Number(url.searchParams.get("id"));
+        if(!Number.isFinite(id))return apiJson({error:"出缺席案件編號不正確"},400);
+        const next=cases.filter(item=>Number(item.id)!==id);
+        const now=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO quality_state (id,cases,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET cases=excluded.cases,updated_at=excluded.updated_at`).bind(JSON.stringify(next),now).run();
+        return apiJson({ok:true,cases:next,updatedAt:now});
+      }
+      return apiJson({error:"不支援的品保操作"},405);
+    }
+    if(url.pathname==="/api/attendance-records"){
+      if(!env.DB)return apiJson({error:"出席資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const row=await env.DB.prepare(`SELECT records,updated_at AS updatedAt FROM attendance_state WHERE id=1`).first<{records:string;updatedAt:string}>();
+      if(request.method==="GET")return apiJson({records:JSON.parse(row?.records||"[]"),updatedAt:row?.updatedAt||null});
+      if(request.method==="POST"){
+        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+        if(!email||email!==admin)return apiJson({error:"只有系統擁有者可以同步 PALMS"},403);
+        const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],baseUpdatedAt=String(body.baseUpdatedAt||"");
+        if(baseUpdatedAt&&row?.updatedAt&&baseUpdatedAt!==row.updatedAt)return apiJson({error:"PALMS 資料已被其他畫面更新",records:JSON.parse(row.records||"[]"),updatedAt:row.updatedAt},409);
+        const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code)));
+        const now=new Date().toISOString();await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(valid),now).run();return apiJson({ok:true,records:valid,updatedAt:now});
+      }
+      return apiJson({error:"出席資料只能由管理員同步"},405);
+    }
+
+    if (url.pathname === "/api/weekly-archives" || url.pathname.startsWith("/api/weekly-archives/")) {
+      if (!env.DB) return apiJson({ error:"會議建檔資料庫尚未啟用" }, 503);
+      await env.DB.batch([
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS weekly_archives (id INTEGER PRIMARY KEY AUTOINCREMENT, meeting_date TEXT NOT NULL UNIQUE, title TEXT NOT NULL, agenda TEXT NOT NULL DEFAULT '[]', checked TEXT NOT NULL DEFAULT '[]', notes TEXT NOT NULL DEFAULT '', renewals TEXT NOT NULL DEFAULT '[]', visitors TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_weekly_archives_date ON weekly_archives(meeting_date)`),
+      ]);
+      const selectSql=`SELECT id, meeting_date AS meetingDate, title, agenda, checked, notes, renewals, visitors, created_at AS createdAt, updated_at AS updatedAt FROM weekly_archives`;
+      const parseArchive=(row:Record<string,unknown>)=>({...row,agenda:JSON.parse(String(row.agenda||"[]")),checked:JSON.parse(String(row.checked||"[]")),renewals:JSON.parse(String(row.renewals||"[]")),visitors:JSON.parse(String(row.visitors||"[]"))});
+      const archiveId=Number(url.pathname.split("/").pop());
+      if(request.method==="GET" && url.pathname==="/api/weekly-archives"){
+        const result=await env.DB.prepare(`${selectSql} ORDER BY meeting_date DESC, id DESC`).all<Record<string,unknown>>();
+        return apiJson({archives:result.results.map(parseArchive)});
+      }
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>;
+        const meetingDate=String(body.meetingDate||"").trim(),title=String(body.title||"").trim();
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate)||!title)return apiJson({error:"會議日期或名稱不完整"},400);
+        const agenda=Array.isArray(body.agenda)?body.agenda:[],checked=Array.isArray(body.checked)?body.checked:[],renewals=Array.isArray(body.renewals)?body.renewals:[],visitors=Array.isArray(body.visitors)?body.visitors:[];
+        const now=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO weekly_archives (meeting_date,title,agenda,checked,notes,renewals,visitors,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(meeting_date) DO UPDATE SET title=excluded.title,agenda=excluded.agenda,checked=excluded.checked,notes=excluded.notes,renewals=excluded.renewals,visitors=excluded.visitors,updated_at=excluded.updated_at`).bind(meetingDate,title,JSON.stringify(agenda),JSON.stringify(checked),String(body.notes||""),JSON.stringify(renewals),JSON.stringify(visitors),now,now).run();
+        const row=await env.DB.prepare(`${selectSql} WHERE meeting_date=?`).bind(meetingDate).first<Record<string,unknown>>();
+        return apiJson({archive:row?parseArchive(row):null},201);
+      }
+      if(request.method==="DELETE" && Number.isInteger(archiveId) && archiveId>0){
+        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase();
+        const adminEmail=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+        if(!email)return apiJson({error:"請先以管理員身分登入"},401);
+        if(!adminEmail||email!==adminEmail)return apiJson({error:"只有系統擁有者可以刪除會議紀錄"},403);
+        const existing=await env.DB.prepare(`SELECT id FROM weekly_archives WHERE id=?`).bind(archiveId).first();
+        if(!existing)return apiJson({error:"找不到這筆會議紀錄"},404);
+        await env.DB.prepare(`DELETE FROM weekly_archives WHERE id=?`).bind(archiveId).run();
+        return apiJson({ok:true});
+      }
+      return apiJson({error:"不支援的建檔操作"},405);
+    }
+
+    if (url.pathname === "/api/local/openai-config" && request.method === "POST") {
+      if (!["localhost","127.0.0.1"].includes(url.hostname)) return apiJson({ error:"此設定僅限本機使用" }, 403);
+      const body = await request.json() as Record<string, unknown>;
+      const apiKey = String(body.apiKey || "").trim();
+      if (!apiKey.startsWith("sk-")) return apiJson({ error:"API 金鑰格式不正確" }, 400);
+      try {
+        const check = await fetch("https://api.openai.com/v1/models", { headers:{ authorization:`Bearer ${apiKey}` } });
+        if (!check.ok) return apiJson({ error:"OpenAI API 金鑰驗證失敗", detail:`HTTP ${check.status}` }, 400);
+        localOpenAIKey = apiKey;
+        return apiJson({ ok:true, message:"API 金鑰已安全保留於本機執行程序" });
+      } catch (error) { return apiJson({ error:"無法連接 OpenAI", detail:error instanceof Error?error.message:"連線失敗" }, 502); }
+    }
+
+    if (url.pathname === "/api/ai/analyze" && request.method === "POST") {
+      const apiKey = env.OPENAI_API_KEY || localOpenAIKey;
+      if (!apiKey) return apiJson({ error:"尚未設定 OpenAI API 金鑰" }, 503);
+      const body = await request.json() as Record<string, unknown>;
+      const text = String(body.text || "").trim();
+      if (!text) return apiJson({ error:"沒有可分析的摘要內容" }, 400);
+      const people = ["主席｜鍾坤宏","副主席｜葉奕廷","秘書財務｜陳姵文","來賓接待組","教育協調員","導師協調員","活動協調員","成長協調相關職務","網站管理員","海外事務組"];
+      const schema = {type:"object",additionalProperties:false,properties:{summary:{type:"string"},decisions:{type:"array",items:{type:"string"}},actions:{type:"array",items:{type:"object",additionalProperties:false,properties:{title:{type:"string"},owner:{type:"string"},dueDate:{type:"string"},evidence:{type:"string"},confidence:{type:"string",enum:["high","medium","low"]}},required:["title","owner","dueDate","evidence","confidence"]}}},required:["summary","decisions","actions"]};
+      try {
+        const response = await fetch("https://api.openai.com/v1/responses", {method:"POST",headers:{authorization:`Bearer ${apiKey}`,"content-type":"application/json"},body:JSON.stringify({model:"gpt-5.6-sol",input:[{role:"system",content:[{type:"input_text",text:`你是 BNI 分會領導團隊的會議紀錄助理。使用繁體中文。只整理原文可支持的內容，不得臆測。摘要要條列、合併重複資訊並移除引文標記。決議只收錄已定案內容。行動事項逐項拆分，一項只含一個可驗收工作；依明確人名或職掌指定 owner，無法確定就填「未指派」。dueDate 只填原文明示且轉為 YYYY-MM-DD，否則留空。可用負責人：${people.join("、")}。evidence 放簡短原文依據。`} ]},{role:"user",content:[{type:"input_text",text}]}],text:{format:{type:"json_schema",name:"bni_meeting_analysis",strict:true,schema}}})});
+        const result = await response.json() as Record<string, any>;
+        if (!response.ok) {
+          const code = String(result.error?.code || result.error?.type || "");
+          if (code.includes("quota") || response.status === 429) return apiJson({ error:"OpenAI API 額度不足", detail:"API 帳戶目前沒有可用額度，或已達每月使用上限。請至 OpenAI Platform 的 Billing 與 Limits 完成付款設定或調高上限後再試。" }, 402);
+          return apiJson({ error:"AI 分析失敗", detail:String(result.error?.message || `HTTP ${response.status}`) }, 502);
+        }
+        const outputText = String(result.output_text || result.output?.flatMap((x:any)=>x.content||[]).find((x:any)=>x.type==="output_text")?.text || "");
+        if (!outputText) return apiJson({ error:"AI 沒有回傳可用結果" }, 502);
+        return apiJson({ analysis:JSON.parse(outputText) });
+      } catch (error) { return apiJson({ error:"AI 分析處理失敗", detail:error instanceof Error?error.message:"未知錯誤" }, 502); }
+    }
+
+    if (url.pathname === "/api/meetings" || url.pathname.startsWith("/api/meetings/")) {
+      if (!env.DB) return apiJson({ error: "會議資料庫尚未啟用" }, 503);
+      await env.DB.batch([
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS meetings (id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL, meeting_date TEXT NOT NULL, summary TEXT NOT NULL, decisions TEXT NOT NULL DEFAULT '[]', action_candidates TEXT NOT NULL DEFAULT '[]', source TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'published', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_meetings_date ON meetings(meeting_date)`),
+      ]);
+      const id = Number(url.pathname.split("/").pop());
+      if (request.method === "GET" && url.pathname === "/api/meetings") {
+        const result = await env.DB.prepare(`SELECT id, source_id AS sourceId, title, meeting_date AS meetingDate, summary, decisions, action_candidates AS actionCandidates, source, status, created_at AS createdAt, updated_at AS updatedAt FROM meetings ORDER BY meeting_date DESC, id DESC`).all();
+        return apiJson({ meetings: result.results });
+      }
+      if (request.method === "GET" && Number.isInteger(id) && id > 0) {
+        const meeting = await env.DB.prepare(`SELECT id, source_id AS sourceId, title, meeting_date AS meetingDate, summary, decisions, action_candidates AS actionCandidates, source, status, created_at AS createdAt, updated_at AS updatedAt FROM meetings WHERE id = ?`).bind(id).first();
+        return meeting ? apiJson({ meeting }) : apiJson({ error: "找不到會議紀錄" }, 404);
+      }
+      if (request.method === "POST" && url.pathname === "/api/meetings") {
+        const body = await request.json() as Record<string, unknown>;
+        const sourceId = String(body.sourceId || "").trim();
+        const title = String(body.title || "").trim();
+        const summary = String(body.summary || "").trim();
+        if (!sourceId || !title || !summary) return apiJson({ error: "會議名稱與摘要不可空白" }, 400);
+        const now = new Date().toISOString();
+        const meetingDate = String(body.meetingDate || now);
+        const decisions = JSON.stringify(Array.isArray(body.decisions) ? body.decisions : []);
+        const actionCandidates = JSON.stringify(Array.isArray(body.actionCandidates) ? body.actionCandidates : []);
+        await env.DB.prepare(`INSERT INTO meetings (source_id, title, meeting_date, summary, decisions, action_candidates, source, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?) ON CONFLICT(source_id) DO UPDATE SET title=excluded.title, meeting_date=excluded.meeting_date, summary=excluded.summary, decisions=excluded.decisions, action_candidates=excluded.action_candidates, source=excluded.source, status='published', updated_at=excluded.updated_at`).bind(sourceId, title, meetingDate, summary, decisions, actionCandidates, String(body.source || "manual"), now, now).run();
+        const meeting = await env.DB.prepare(`SELECT id, source_id AS sourceId, title, meeting_date AS meetingDate, summary, decisions, action_candidates AS actionCandidates, source, status, created_at AS createdAt, updated_at AS updatedAt FROM meetings WHERE source_id = ?`).bind(sourceId).first();
+        return apiJson({ meeting }, 201);
+      }
+      if (request.method === "DELETE" && Number.isInteger(id) && id > 0) {
+        const existing = await env.DB.prepare(`SELECT id FROM meetings WHERE id = ?`).bind(id).first();
+        if (!existing) return apiJson({ error: "找不到會議紀錄" }, 404);
+        await env.DB.prepare(`DELETE FROM meetings WHERE id = ?`).bind(id).run();
+        return apiJson({ ok: true });
+      }
+      return apiJson({ error: "不支援的會議操作" }, 405);
+    }
+
+    if (url.pathname === "/api/actions" || url.pathname.startsWith("/api/actions/")) {
+      if (!env.DB) return apiJson({ error: "行動追蹤資料庫尚未啟用" }, 503);
+      await env.DB.batch([
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS action_items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, owner TEXT NOT NULL DEFAULT '', due_date TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'todo', meeting_title TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
+        env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_action_items_status_due ON action_items(status, due_date)`),
+      ]);
+      const id = Number(url.pathname.split("/").pop());
+      if (request.method === "GET" && url.pathname === "/api/actions") {
+        const result = await env.DB.prepare(`SELECT id, title, owner, due_date AS dueDate, status, meeting_title AS meetingTitle, notes, created_at AS createdAt, updated_at AS updatedAt FROM action_items ORDER BY CASE status WHEN 'todo' THEN 1 WHEN 'doing' THEN 2 ELSE 3 END, CASE WHEN due_date = '' THEN 1 ELSE 0 END, due_date ASC, id DESC`).all();
+        return apiJson({ actions: result.results });
+      }
+      if (request.method === "POST" && url.pathname === "/api/actions") {
+        const body = await request.json() as Record<string, unknown>;
+        const title = String(body.title || "").trim();
+        if (!title) return apiJson({ error: "請填寫行動事項" }, 400);
+        const meetingTitle = String(body.meetingTitle || "").trim();
+        const duplicate = await env.DB.prepare(`SELECT id FROM action_items WHERE title = ? AND meeting_title = ? LIMIT 1`).bind(title, meetingTitle).first<{ id:number }>();
+        if (duplicate) return apiJson({ id: duplicate.id, alreadyExists: true });
+        const now = new Date().toISOString();
+        const result = await env.DB.prepare(`INSERT INTO action_items (title, owner, due_date, status, meeting_title, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(title, String(body.owner || "").trim(), String(body.dueDate || ""), ["todo","doing","done"].includes(String(body.status)) ? String(body.status) : "todo", String(body.meetingTitle || "").trim(), String(body.notes || "").trim(), now, now).run();
+        return apiJson({ id: result.meta.last_row_id }, 201);
+      }
+      if (request.method === "PATCH" && Number.isInteger(id) && id > 0) {
+        const body = await request.json() as Record<string, unknown>;
+        const current = await env.DB.prepare(`SELECT * FROM action_items WHERE id = ?`).bind(id).first<Record<string, unknown>>();
+        if (!current) return apiJson({ error: "找不到行動事項" }, 404);
+        const title = String(body.title ?? current.title).trim();
+        if (!title) return apiJson({ error: "請填寫行動事項" }, 400);
+        const status = String(body.status ?? current.status);
+        await env.DB.prepare(`UPDATE action_items SET title=?, owner=?, due_date=?, status=?, meeting_title=?, notes=?, updated_at=? WHERE id=?`).bind(title, String(body.owner ?? current.owner), String(body.dueDate ?? current.due_date), ["todo","doing","done"].includes(status) ? status : current.status, String(body.meetingTitle ?? current.meeting_title), String(body.notes ?? current.notes), new Date().toISOString(), id).run();
+        return apiJson({ ok: true });
+      }
+      if (request.method === "DELETE" && Number.isInteger(id) && id > 0) {
+        await env.DB.prepare(`DELETE FROM action_items WHERE id = ?`).bind(id).run();
+        return apiJson({ ok: true });
+      }
+      return apiJson({ error: "不支援的操作" }, 405);
+    }
+
+    if (url.pathname === "/api/local/zoom-config" && request.method === "POST") {
+      if (!["localhost","127.0.0.1"].includes(url.hostname)) return apiJson({ error: "此設定僅限本機使用" }, 403);
+      const body = await request.json() as Record<string, unknown>;
+      const accountId = String(body.accountId || "").trim();
+      const clientId = String(body.clientId || "").trim();
+      const clientSecret = String(body.clientSecret || "").trim();
+      if (!accountId || !clientId || !clientSecret) return apiJson({ error: "三項 Zoom 憑證都必須填寫" }, 400);
+      try {
+        const basic = btoa(`${clientId}:${clientSecret}`);
+        const test = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${encodeURIComponent(accountId)}`, { method:"POST", headers:{ authorization:`Basic ${basic}` } });
+        const result = await test.json() as Record<string, unknown>;
+        if (!test.ok || !result.access_token) return apiJson({ error: "Zoom 驗證失敗", detail: String(result.reason || result.error || `HTTP ${test.status}`) }, 400);
+        localZoomCredentials = { accountId, clientId, clientSecret };
+        return apiJson({ ok:true, message:"Zoom 本機憑證已驗證" });
+      } catch (error) {
+        return apiJson({ error:"無法連接 Zoom", detail:error instanceof Error?error.message:"連線失敗" }, 502);
+      }
+    }
+
+    if (url.pathname === "/api/zoom/summaries" && request.method === "GET") {
+      const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
+        status,
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      });
+      const zoomAccountId = env.ZOOM_ACCOUNT_ID || localZoomCredentials?.accountId;
+      const zoomClientId = env.ZOOM_CLIENT_ID || localZoomCredentials?.clientId;
+      const zoomClientSecret = env.ZOOM_CLIENT_SECRET || localZoomCredentials?.clientSecret;
+      if (!zoomAccountId || !zoomClientId || !zoomClientSecret) {
+        return json({ error: "Zoom 尚未設定", detail: "網站管理員尚未完成 Zoom 憑證設定。" }, 503);
+      }
+      try {
+        const basic = btoa(`${zoomClientId}:${zoomClientSecret}`);
+        const tokenResponse = await fetch(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${encodeURIComponent(zoomAccountId)}`, {
+          method: "POST",
+          headers: { authorization: `Basic ${basic}` },
+        });
+        const tokenBody = await tokenResponse.json() as { access_token?: string; reason?: string; error?: string };
+        if (!tokenResponse.ok || !tokenBody.access_token) {
+          return json({ error: "Zoom 授權失敗", detail: tokenBody.reason || tokenBody.error || `HTTP ${tokenResponse.status}` }, 502);
+        }
+        const listResponse = await fetch("https://api.zoom.us/v2/meetings/meeting_summaries?page_size=30", {
+          headers: { authorization: `Bearer ${tokenBody.access_token}` },
+        });
+        const listBody = await listResponse.json() as Record<string, unknown>;
+        if (!listResponse.ok) {
+          const detail = String(listBody.message || listBody.reason || `HTTP ${listResponse.status}`);
+          return json({ error: "無法讀取 Zoom 摘要", detail }, 502);
+        }
+        const rows = (Array.isArray(listBody.summaries) ? listBody.summaries : []) as Record<string, unknown>[];
+        const summaries = await Promise.all(rows.slice(0, 20).map(async row => {
+          const meetingUuid = String(row.meeting_uuid || row.meeting_id || "");
+          const encodedId = meetingUuid.startsWith("/") || meetingUuid.includes("//")
+            ? encodeURIComponent(encodeURIComponent(meetingUuid))
+            : encodeURIComponent(meetingUuid);
+          let detail: Record<string, unknown> = {};
+          if (encodedId) {
+            const detailResponse = await fetch(`https://api.zoom.us/v2/meetings/${encodedId}/meeting_summary`, {
+              headers: { authorization: `Bearer ${tokenBody.access_token}` },
+            });
+            if (detailResponse.ok) detail = await detailResponse.json() as Record<string, unknown>;
+          }
+          const edited = detail.edited_summary && typeof detail.edited_summary === "object" ? detail.edited_summary as Record<string, unknown> : {};
+          const detailSections = Array.isArray(detail.summary_details)
+            ? (detail.summary_details as Record<string, unknown>[]).map(section => `${String(section.label || "")}\n${String(section.summary || "")}`).join("\n\n")
+            : "";
+          const nextStepsSource = edited.next_steps || detail.next_steps;
+          return {
+            meetingId: String(row.meeting_id || detail.meeting_id || ""),
+            meetingUuid,
+            topic: String(row.meeting_topic || detail.meeting_topic || "未命名會議"),
+            startTime: String(row.meeting_start_time || detail.meeting_start_time || ""),
+            summary: String(detail.summary_content || edited.summary_overview || detail.summary_overview || detailSections || "摘要內容尚在處理中"),
+            nextSteps: Array.isArray(nextStepsSource) ? nextStepsSource.map(String) : typeof nextStepsSource === "string" ? nextStepsSource.split(/\n+/).filter(Boolean) : [],
+            hostEmail: String(row.meeting_host_email || detail.meeting_host_email || ""),
+          };
+        }));
+        return json({ summaries });
+      } catch (error) {
+        return json({ error: "Zoom 連線發生錯誤", detail: error instanceof Error ? error.message : "未知錯誤" }, 502);
+      }
+    }
+
+    if (url.pathname === "/_vinext/image") {
+      const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
+      return handleImageOptimization(request, {
+        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+        transformImage: async (body, { width, format, quality }) => {
+          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+          return result.response();
+        },
+      }, allowedWidths);
+    }
+
+    return handler.fetch(request, env, ctx);
+  },
+};
+
+export default worker;

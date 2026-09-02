@@ -1,0 +1,6 @@
+/* Only the member-name column is wide and sticky; date headers stay compact. */
+.attendance-matrix thead tr:nth-child(2) th:first-child{position:sticky;left:auto;z-index:2;min-width:38px;width:38px;text-align:center;background:#f3f1ed}
+.attendance-matrix thead tr:first-child th:first-child,.attendance-matrix tbody th:first-child{position:sticky;left:0;z-index:4;min-width:118px;width:118px;text-align:left}
+.attendance-matrix thead tr:first-child th:first-child{z-index:6;background:#f3f1ed}
+.attendance-matrix tbody th:first-child{background:#fff}
+.quality-rule-note{margin:0;padding:11px 15px;border:1px solid #eadcb9;border-radius:7px;background:#fff8e8;color:#6e5b2c;font-size:10px;line-height:1.6}.quality-rule-note b{font-weight:800}
