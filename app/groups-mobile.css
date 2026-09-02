@@ -1,0 +1,25 @@
+@media(max-width:720px){
+  .group-page{gap:12px}
+  .group-workspace{display:flex;flex-direction:column;gap:12px;width:100%;overflow:visible}
+  .group-grid{order:1;width:100%;display:grid;grid-template-columns:1fr;gap:12px;min-width:0}
+  .member-group{width:100%;min-height:0;overflow:visible;border-radius:10px}
+  .member-group>header{padding:12px 14px}
+  .member-group>header div b{font-size:15px}
+  .member-group>header div small{font-size:10px}
+  .group-role-row{grid-template-columns:62px minmax(0,1fr);min-height:54px}
+  .group-role-row>b{padding:8px 5px;font-size:11px}
+  .group-role-row>div{padding:7px;min-height:53px;gap:6px}
+  .group-role-row>div>small{font-size:10px}
+  .group-role-row article{min-height:38px;padding:8px 9px;gap:8px;border-radius:7px}
+  .group-role-row article strong{overflow:visible;font-size:12px;text-overflow:clip;white-space:normal;word-break:keep-all}
+  .drag-handle{font-size:14px}
+  .role-組員>div{min-height:72px}
+  .unassigned-pool{order:2;position:static;grid-column:auto;grid-row:auto;width:100%;max-height:none;overflow:visible}
+  .unassigned-pool header{padding:12px 14px}
+  .unassigned-pool header b{font-size:13px}
+  .unassigned-pool>div{grid-template-columns:repeat(2,minmax(0,1fr));max-height:320px;padding:10px 10px 24px;overflow-y:auto}
+  .unassigned-pool article{min-width:0;padding:10px}
+  .unassigned-pool article b{overflow:visible;font-size:11px;white-space:normal}
+}
+
+@media(max-width:390px){.unassigned-pool>div{grid-template-columns:1fr}}
