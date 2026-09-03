@@ -76,6 +76,30 @@ const worker = {
       return apiJson({ authenticated: Boolean(email), isOwner: Boolean(email && adminEmail && email === adminEmail) });
     }
 
+    if(url.pathname==="/api/member-kpis"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以查看或維護 KPI"},403);
+      if(!env.DB)return apiJson({error:"KPI 資料庫尚未啟用"},503);
+      const selectSql=`SELECT member, training_points AS trainingPoints, visitor_count AS visitorCount, one_to_one_weekly_average AS oneToOneWeeklyAverage, referral_weekly_average AS referralWeeklyAverage, dream_referral_amount AS dreamReferralAmount, updated_at AS updatedAt FROM member_kpi_state`;
+      if(request.method==="GET"){
+        const result=await env.DB.prepare(selectSql).all();
+        return apiJson({records:result.results||[]});
+      }
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,member=String(body.member||"").trim(),baseUpdatedAt=String(body.baseUpdatedAt||"");
+        if(!member)return apiJson({error:"請選擇會員"},400);
+        const current=await env.DB.prepare(`${selectSql} WHERE member=?`).bind(member).first<Record<string,unknown>>();
+        if(baseUpdatedAt&&current?.updatedAt&&baseUpdatedAt!==String(current.updatedAt))return apiJson({error:"此會員 KPI 已被其他畫面更新",record:current},409);
+        const numberOrNull=(key:string,integer=false)=>{const value=body[key];if(value===null||value===""||typeof value==="undefined")return null;const number=Number(value);return Number.isFinite(number)&&number>=0?(integer?Math.round(number):number):NaN};
+        const trainingPoints=numberOrNull("trainingPoints",true),visitorCount=numberOrNull("visitorCount",true),oneToOneWeeklyAverage=numberOrNull("oneToOneWeeklyAverage"),referralWeeklyAverage=numberOrNull("referralWeeklyAverage"),dreamReferralAmount=numberOrNull("dreamReferralAmount",true);
+        if([trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount].some(Number.isNaN))return apiJson({error:"KPI 數值必須為零或正數"},400);
+        const updatedAt=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO member_kpi_state (member,training_points,visitor_count,one_to_one_weekly_average,referral_weekly_average,dream_referral_amount,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET training_points=excluded.training_points,visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,dream_referral_amount=excluded.dream_referral_amount,updated_at=excluded.updated_at`).bind(member,trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount,updatedAt).run();
+        return apiJson({ok:true,record:{member,trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount,updatedAt}});
+      }
+      return apiJson({error:"不支援的 KPI 資料操作"},405);
+    }
+
     if(url.pathname==="/api/bni-connect/session"){
       const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
       if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以設定 BNI Connect"},403);

@@ -78,6 +78,7 @@ type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
 type MemberGroup={id:number;name:string;members:GroupMember[]};
 type CareAssignment={member:string;groupId:number;committee:string;leader:string};
+type MemberKpi={member:string;trainingPoints:number|null;visitorCount:number|null;oneToOneWeeklyAverage:number|null;referralWeeklyAverage:number|null;dreamReferralAmount:number|null;updatedAt?:string};
 const qualityIssueOptions:{value:QualityCase["issue"];label:string}[]=[{value:"缺席",label:"缺席"},{value:"遲到",label:"遲到"},{value:"替代人",label:"替代人"},{value:"A信",label:"需要 A 信"},{value:"B信",label:"需要 B 信"},{value:"關懷",label:"需要組長關懷"}];
 const qualityIssueLabel=(issue:QualityCase["issue"])=>qualityIssueOptions.find(option=>option.value===issue)?.label||issue;
 const letterText=(issue:"A信"|"B信",member:string)=>issue==="A信"?`親愛的 ${member} 會員，
@@ -369,6 +370,11 @@ function taipeiDateKey(now = new Date()) {
   }).format(now);
 }
 function upcomingThursdayKey(){const base=new Date(`${taipeiDateKey()}T12:00:00+08:00`);const offset=(4-base.getDay()+7)%7;base.setDate(base.getDate()+offset);return taipeiDateKey(base)}
+const trainingScore=(value:number)=>value>=6?15:value>=4?10:value>=2?5:0;
+const visitorScore=(value:number)=>value>=2?15:value>=1?10:0;
+const oneToOneScore=(value:number)=>value>=2?15:value>=1?10:value>=0.5?5:0;
+const referralScore=(value:number)=>value>2?20:value>1.2?15:value>1?10:value===1?5:0;
+const dreamReferralScore=(value:number)=>value>=2000000?15:value>800000?10:value>400000?5:0;
 
 export default function Home() {
   const [view, setView] = useState<View>("dashboard"),
@@ -378,6 +384,7 @@ export default function Home() {
     [qualityCases,setQualityCases]=useState<QualityCase[]>([]),
     [memberGroups,setMemberGroups]=useState<MemberGroup[]>(seedMemberGroups),
     [careAssignments,setCareAssignments]=useState<CareAssignment[]>([]),
+    [memberKpis,setMemberKpis]=useState<MemberKpi[]>([]),
     [draggedMember,setDraggedMember]=useState(""),
     [attendanceRecords,setAttendanceRecords]=useState<AttendanceRecord[]>([]),
     [attendancePreview,setAttendancePreview]=useState<AttendancePreview|null>(null),
@@ -458,6 +465,7 @@ export default function Home() {
     fetch("/api/attendance-records").then(r=>r.ok?r.json():null).then(data=>{setAttendanceRecords(data?.records||[]);setAttendanceUpdatedAt(data?.updatedAt||"")}).catch(()=>{});
     fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{});
     fetch("/api/member-care-owners").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.assignments))setCareAssignments(data.assignments)}).catch(()=>{});
+    fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
   }, []);
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors);serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
@@ -492,6 +500,17 @@ export default function Home() {
   }),[attendanceRecords,memberWindow,departedMembers,renewals,qualityCases,careAssignmentMap]);
   const filteredMemberProfiles=memberProfiles.filter(profile=>profile.name.includes(memberSearch.trim())&&(!hideClearMembers||profile.concerns.length>0));
   const activeMemberProfile=memberProfiles.find(profile=>profile.name===selectedMember)||filteredMemberProfiles[0]||memberProfiles[0];
+  const activeMemberKpi:MemberKpi=memberKpis.find(item=>item.member===activeMemberProfile?.name)||{member:activeMemberProfile?.name||"",trainingPoints:null,visitorCount:null,oneToOneWeeklyAverage:null,referralWeeklyAverage:null,dreamReferralAmount:null};
+  const activeKpiScores=activeMemberProfile?{
+    attendance:activeMemberProfile.records.length?activeMemberProfile.attendancePoints:null,
+    training:activeMemberKpi.trainingPoints===null?null:trainingScore(activeMemberKpi.trainingPoints),
+    visitors:activeMemberKpi.visitorCount===null?null:visitorScore(activeMemberKpi.visitorCount),
+    oneToOne:activeMemberKpi.oneToOneWeeklyAverage===null?null:oneToOneScore(activeMemberKpi.oneToOneWeeklyAverage),
+    referrals:activeMemberKpi.referralWeeklyAverage===null?null:referralScore(activeMemberKpi.referralWeeklyAverage),
+    dreamReferral:activeMemberKpi.dreamReferralAmount===null?null:dreamReferralScore(activeMemberKpi.dreamReferralAmount),
+  }:null;
+  const activeKpiValues=activeKpiScores?Object.values(activeKpiScores):[],activeKpiComplete=activeKpiValues.length===6&&activeKpiValues.every(value=>value!==null),activeKpiTotal=activeKpiComplete?activeKpiValues.reduce<number>((sum,value)=>sum+(value||0),0):null;
+  const activeKpiLight=activeKpiTotal===null?null:activeKpiTotal>=70?"green":activeKpiTotal>=50?"yellow":activeKpiTotal>=30?"red":"black";
   const activeVisitors=visitors.filter((visitor)=>visitor.visitDate===visitorRelayDate&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&!visitor.agendaExcludedDates?.includes(visitorRelayDate));
   const visitorDateGroups=useMemo(()=>Object.entries(visitors.reduce<Record<string,Visitor[]>>((groups,visitor)=>{const key=visitor.visitDate||"日期待補";(groups[key]||=[]).push(visitor);return groups},{})).sort(([a],[b])=>a==="日期待補"?1:b==="日期待補"?-1:b.localeCompare(a)),[visitors]);
   function visitorOverdue(visitor:Visitor){if(!visitor.visitDate)return "";const days=Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitor.visitDate}T00:00:00`).getTime())/86400000);if(visitor.stage==="已簽單"&&days>3)return "訪談逾期";if(visitor.stage==="訪談中"&&days>4)return "投票逾期";if(visitor.stage==="待投票"&&days>7)return "通知逾期";if(visitor.stage==="待繳費"&&days>14)return "付款逾期";return ""}
@@ -542,6 +561,18 @@ export default function Home() {
   function flash(message: string) {
     setNotice(message);
     setTimeout(() => setNotice(""), 2400);
+  }
+  function updateActiveMemberKpi(field:keyof Pick<MemberKpi,"trainingPoints"|"visitorCount"|"oneToOneWeeklyAverage"|"referralWeeklyAverage"|"dreamReferralAmount">,value:string){
+    if(!activeMemberProfile)return;
+    const nextValue=value===""?null:Number(value),existing=memberKpis.find(item=>item.member===activeMemberProfile.name),next={...(existing||activeMemberKpi),member:activeMemberProfile.name,[field]:nextValue};
+    setMemberKpis(records=>existing?records.map(item=>item.member===activeMemberProfile.name?next:item):[...records,next]);
+  }
+  async function saveActiveMemberKpi(){
+    if(!activeMemberProfile)return;
+    const response=await fetch("/api/member-kpis",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(activeMemberKpi)}),data=await response.json();
+    if(response.status===409&&data.record){setMemberKpis(records=>records.map(item=>item.member===data.record.member?data.record:item));flash("KPI 剛被其他畫面更新，已載入最新資料");return}
+    if(!response.ok){flash(data.error||"KPI 儲存失敗");return}
+    setMemberKpis(records=>records.some(item=>item.member===data.record.member)?records.map(item=>item.member===data.record.member?data.record:item):[...records,data.record]);flash(`${activeMemberProfile.name} 的 KPI 已儲存`);
   }
   async function persistMemberGroups(next:MemberGroup[]){
     setMemberGroups(next);
@@ -919,7 +950,18 @@ export default function Home() {
                   </section>
                   <section className="panel member-concerns"><header><div><b>目前需要關心的狀態</b><small>自動整合出缺席、續約與已建立案件</small></div></header>{activeMemberProfile.concerns.length===0?<p className="member-clear">✓ 目前無待處理事項</p>:<div>{activeMemberProfile.concerns.map((concern,index)=><article key={`${concern}-${index}`}><span>!</span><div><b>{concern}</b><small>{activeMemberProfile.assignment?.committee?`建議由 ${activeMemberProfile.assignment.committee}／${activeMemberProfile.assignment.leader||"小組長"} 處理`:"尚未設定分組負責人"}</small></div></article>)}</div>}</section>
                   <details className="panel bni-connect-setup"><summary><div><b>BNI Connect 瀏覽器同步工具</b><small>避開 403・登入資料只留在你的瀏覽器</small></div><span className="connected">安全同步</span></summary><div><p>工具只會上傳會員姓名、例會日期與 PALMS 代碼，不會把 BNI Token 傳到公開網站。</p><a className="button-link" href="/downloads/bni-palms-sync-extension.zip" download>1. 下載瀏覽器同步工具</a><button type="button" onClick={createBniSyncPair}>2. 產生新的配對金鑰</button>{bniSyncKey&&<label><span>同步配對金鑰（只顯示這一次）</span><input readOnly value={bniSyncKey} onFocus={event=>event.currentTarget.select()}/></label>}<ol><li>解壓縮下載檔，在 Chrome 擴充功能頁開啟「開發人員模式」並載入資料夾。</li><li>把上方配對金鑰貼入工具並儲存。</li><li>登入 BNI Connect，點工具的「立即同步 PALMS」。</li></ol></div></details>
-                  <section className="panel member-scorecard"><header><div><b>個人紅綠燈計分</b><small>出席已連動；其餘欄位等待 Connect 個人 PALMS／活動 API</small></div><strong>待完整同步</strong></header><div className="score-grid"><article className="ready"><span>出席</span><b>{activeMemberProfile.attendancePoints}<small>／20</small></b><p>缺席 {activeMemberProfile.absent}・遲到 {activeMemberProfile.late}・代理 {activeMemberProfile.substitute}</p></article>{[["培訓","／15"],["四週來賓","／15"],["每週一對一","／15"],["每週引薦","／20"],["夢幻引薦金額","／15"]].map(([label,max])=><article key={label}><span>{label}</span><b>—<small>{max}</small></b><p>等待 Connect 資料</p></article>)}</div><p className="score-sync-note">資料未完整前不產生總分或燈號，避免把尚未取得的活動誤判為零分。</p></section>
+                  <section className="panel member-scorecard">
+                    <header><div><b>個人紅綠燈計分</b><small>出席自動連動；其餘數值可先手動維護，日後再接 Connect</small></div><strong className={activeKpiLight?`kpi-light ${activeKpiLight}`:""}>{activeKpiTotal===null?`待補 ${activeKpiValues.filter(value=>value===null).length} 項`:`${activeKpiTotal} 分｜${{green:"綠燈",yellow:"黃燈",red:"紅燈",black:"黑燈"}[activeKpiLight!]}`}</strong></header>
+                    <div className="score-grid">
+                      <article className={activeKpiScores?.attendance===null?"":"ready"}><span>出席</span><b>{activeKpiScores?.attendance??"—"}<small>／20</small></b><p>{activeMemberProfile.records.length?`缺席 ${activeMemberProfile.absent}・遲到 ${activeMemberProfile.late}・代理 ${activeMemberProfile.substitute}`:"尚無六個月 PALMS 紀錄"}</p></article>
+                      <article className={activeKpiScores?.training===null?"":"ready"}><span>培訓（六個月點數）</span><b>{activeKpiScores?.training??"—"}<small>／15</small></b><input aria-label="培訓點數" type="number" min="0" step="1" value={activeMemberKpi.trainingPoints??""} onChange={event=>updateActiveMemberKpi("trainingPoints",event.target.value)} placeholder="輸入點數"/></article>
+                      <article className={activeKpiScores?.visitors===null?"":"ready"}><span>四週來賓（人數）</span><b>{activeKpiScores?.visitors??"—"}<small>／15</small></b><input aria-label="四週來賓人數" type="number" min="0" step="1" value={activeMemberKpi.visitorCount??""} onChange={event=>updateActiveMemberKpi("visitorCount",event.target.value)} placeholder="輸入人數"/></article>
+                      <article className={activeKpiScores?.oneToOne===null?"":"ready"}><span>每週一對一（平均）</span><b>{activeKpiScores?.oneToOne??"—"}<small>／15</small></b><input aria-label="每週一對一平均" type="number" min="0" step="0.1" value={activeMemberKpi.oneToOneWeeklyAverage??""} onChange={event=>updateActiveMemberKpi("oneToOneWeeklyAverage",event.target.value)} placeholder="例如 1.5"/></article>
+                      <article className={activeKpiScores?.referrals===null?"":"ready"}><span>每週引薦（平均）</span><b>{activeKpiScores?.referrals??"—"}<small>／20</small></b><input aria-label="每週引薦平均" type="number" min="0" step="0.1" value={activeMemberKpi.referralWeeklyAverage??""} onChange={event=>updateActiveMemberKpi("referralWeeklyAverage",event.target.value)} placeholder="例如 1.2"/></article>
+                      <article className={activeKpiScores?.dreamReferral===null?"":"ready"}><span>夢幻引薦金額（六個月）</span><b>{activeKpiScores?.dreamReferral??"—"}<small>／15</small></b><input aria-label="夢幻引薦金額" type="number" min="0" step="10000" value={activeMemberKpi.dreamReferralAmount??""} onChange={event=>updateActiveMemberKpi("dreamReferralAmount",event.target.value)} placeholder="輸入金額"/></article>
+                    </div>
+                    <div className="kpi-actions"><p className="score-sync-note">空白欄位維持「待補」，不會當成 0 分；全部六項完整後才產生總分與燈號。</p><button type="button" onClick={saveActiveMemberKpi}>儲存 KPI 資料</button></div>
+                  </section>
                   <details className="panel member-palms-detail"><summary><div><b>最近六個月個人 PALMS 出席明細</b><small>{activeMemberProfile.records.length} 筆紀錄</small></div><span>展開</span></summary><div>{activeMemberProfile.records.length===0?<p>目前沒有可顯示的出席紀錄</p>:activeMemberProfile.records.sort((a,b)=>b.date.localeCompare(a.date)).map(record=><span key={`${record.date}-${record.code}`}>{record.date}<b>{{P:"出席",A:"缺席",L:"遲到",M:"醫療",S:"代理"}[record.code]}</b></span>)}</div></details>
                 </div>}
               </div>

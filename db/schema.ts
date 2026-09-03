@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const actionItems = sqliteTable("action_items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -58,3 +58,13 @@ export const qualityState = sqliteTable("quality_state", {
   updatedAt: text("updated_at").notNull(),
 });
 export const attendanceState=sqliteTable("attendance_state",{id:integer("id").primaryKey(),records:text("records").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
+
+export const memberKpiState = sqliteTable("member_kpi_state", {
+  member: text("member").primaryKey(),
+  trainingPoints: integer("training_points"),
+  visitorCount: integer("visitor_count"),
+  oneToOneWeeklyAverage: real("one_to_one_weekly_average"),
+  referralWeeklyAverage: real("referral_weekly_average"),
+  dreamReferralAmount: integer("dream_referral_amount"),
+  updatedAt: text("updated_at").notNull(),
+});
