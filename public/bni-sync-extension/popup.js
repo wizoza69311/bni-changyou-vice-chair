@@ -83,6 +83,64 @@ async function readPageContext(tabId) {
   });
   return result || { params: {}, url: "", text: "" };
 }
+async function readAttendancePalms(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: async () => {
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        end = new Date(),
+        start = new Date(end.getFullYear(), end.getMonth() - 5, 1),
+        displayDate = (date) =>
+          `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+      document.querySelector(".ui-dialog-titlebar-close")?.click();
+      const tabLink = document.querySelector('a[href="#ui-tabs-16"]');
+      if (!tabLink) return { error: "找不到 PALMS 出席報告，請確認目前位於 BNI 報告頁" };
+      tabLink.click();
+      let form = null;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        form = document.querySelector("#chapter_PALMSAttendanceReport");
+        if (form) break;
+        await wait(100);
+      }
+      if (!form) return { error: "PALMS 出席報告無法開啟" };
+      for (const [id, value] of [
+        ["startDateChapterChapterPALMSAttendanceReportDisplay", displayDate(start)],
+        ["endDateChapterChapterPALMSAttendanceReportDisplay", displayDate(end)],
+      ]) {
+        const input = document.getElementById(id);
+        if (!input) return { error: "PALMS 出席報告日期欄位無法辨識" };
+        input.value = value;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      form.querySelector("#button")?.click();
+      let report = null;
+      for (let attempt = 0; attempt < 80; attempt++) {
+        await wait(250);
+        try {
+          const candidate = document.querySelector("#reportsIFrame")?.contentDocument;
+          if (candidate?.body?.innerText?.includes("PALMS出席報告")) {
+            report = candidate;
+            break;
+          }
+        } catch {}
+      }
+      if (!report) return { error: "PALMS 出席報告載入逾時，請確認 BNI 仍保持登入" };
+      const exportLink = [...report.querySelectorAll("a")].find((link) =>
+        /ReportType=XLS/i.test(link.href),
+      );
+      if (!exportLink) return { error: "找不到 PALMS 匯出資料" };
+      const response = await fetch(exportLink.href, { credentials: "include" });
+      if (!response.ok) return { error: `PALMS 匯出失敗（${response.status}）` };
+      const text = await response.text();
+      document.querySelector(".ui-dialog-titlebar-close")?.click();
+      return { text, end: end.toISOString() };
+    },
+  });
+  if (result?.error) throw new Error(result.error);
+  if (!result?.text) throw new Error("PALMS 出席報告沒有可同步內容");
+  return result;
+}
 async function readPersonalPalms(tabId) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId },
@@ -487,19 +545,11 @@ $("sync").onclick = async () => {
     const [tab] = await chrome.tabs.query({
         active: true,
         currentWindow: true,
-      }),
-      headers = await sessionFor(tab),
-      { params } = await reportContext(tab, headers),
-      end = new Date(),
-      start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
-    params.menuName = "menu.reports.chapter.palms.attendance";
-    if (!params.IdOrg || !params.__heading_region || !params.__heading_country)
-      throw new Error("無法取得分會識別資料，請保持 PALMS 出席報告開啟");
-    status("正在產生滾動六個月 PALMS…");
-    const records = parseAttendanceReport(
-      await generateReport(params, start, end, headers),
-      end,
-    );
+      });
+    await sessionFor(tab);
+    status("正在自動開啟並產生滾動六個月 PALMS…");
+    const report = await readAttendancePalms(tab.id),
+      records = parseAttendanceReport(report.text, new Date(report.end));
     if (!records.length) throw new Error("報表沒有可同步的 PALMS 紀錄");
     const result = await upload(key, { records });
     status(`同步完成：${result.count} 筆出席已更新。`, "ok");
