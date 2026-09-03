@@ -1,23 +1,511 @@
-const SITE="https://bni-changyou-vice-chair.wizoza69311.chatgpt.site";
-const $=id=>document.getElementById(id),status=(text,type="")=>{$("status").textContent=text;$("status").className=type};
-chrome.storage.local.get("syncKey",data=>{$("key").value=data.syncKey||""});
-$("save").onclick=()=>{const syncKey=$("key").value.trim();chrome.storage.local.set({syncKey},()=>status(syncKey?"配對金鑰已安全儲存在這台瀏覽器。":"金鑰已清除。","ok"))};
-const normalize=value=>String(value||"").toLowerCase().replace(/[\s_\-–—／/()（）:：.]/g,"");
-const number=value=>{const parsed=Number(String(value||"").replace(/[^\d.-]/g,""));return Number.isFinite(parsed)?parsed:0};
-const cellValues=row=>{const output=[];let cursor=0;for(const cell of[...row.getElementsByTagNameNS("*","Cell")]){const index=cell.getAttributeNS("urn:schemas-microsoft-com:office:spreadsheet","Index")||cell.getAttribute("ss:Index");if(index)cursor=Number(index)-1;output[cursor]=(cell.getElementsByTagNameNS("*","Data")[0]?.textContent||"").trim();cursor++}return output};
-const spreadsheetRows=text=>{const xml=new DOMParser().parseFromString(text,"application/xml");if(xml.querySelector("parsererror"))throw new Error("BNI 回傳的報表格式無法辨識");return [...xml.getElementsByTagNameNS("*","Row")].map(cellValues)};
-function findId(source,key){const wanted=normalize(key),seen=new Set();function visit(value){if(!value||typeof value!=="object"||seen.has(value))return"";seen.add(value);for(const[name,item]of Object.entries(value)){if(normalize(name).includes(wanted)&&/\d{2,}/.test(String(item||"")))return String(item).match(/\d{2,}/)?.[0]||"";const nested=visit(item);if(nested)return nested}return""}return visit(source)}
-async function readPageContext(tabId){const[{result}]=await chrome.scripting.executeScript({target:{tabId},world:"MAIN",func:()=>{const params=Object.fromEntries(new URL(location.href).searchParams.entries());for(const element of document.querySelectorAll("input[name],select[name]")){if(element.value&&!params[element.name])params[element.name]=element.value}return{params,url:location.href,text:(document.body?.innerText||"").slice(0,1200)}}});return result||{params:{},url:"",text:""}}
-async function readPersonalPalms(tabId){const[{result}]=await chrome.scripting.executeScript({target:{tabId},world:"MAIN",func:async()=>{const form=document.querySelector("#chapter_Personal_VP"),select=document.querySelector("#membershipIdMemberPersonalVP");if(!form||!select)return{error:"請先在報告頁展開『個人 PALMS 報告』"};const end=new Date(),sixStart=new Date(end.getFullYear(),end.getMonth()-5,1),fourStart=new Date(end);fourStart.setDate(end.getDate()-27);const displayDate=date=>`${String(date.getDate()).padStart(2,"0")}/${String(date.getMonth()+1).padStart(2,"0")}/${date.getFullYear()}`,normalize=value=>String(value||"").replace(/[\s_\-–—／/()（）:：.]/g,"").toLowerCase(),asNumber=value=>{const parsed=Number(String(value||"").replace(/[^\d.-]/g,""));return Number.isFinite(parsed)?parsed:0},asDate=value=>{const parts=String(value||"").match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);return parts?new Date(Number(parts[1]),Number(parts[2])-1,Number(parts[3])):null},wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),directCells=row=>[...row.children].filter(cell=>cell.tagName==="TH"||cell.tagName==="TD").map(cell=>(cell.textContent||"").trim());const aliases={date:["會議日期","meetingdate"],inside:["提供內部引薦","gi","referralsgiveninside"],outside:["提供外部引薦","go","referralsgivenoutside"],visitors:["來賓","v","visitors"],oneToOne:["一對一會面","121","onetoone"],amount:["交易價值","成交價值","引薦金額","tyfcb","businessvalue"],education:["分會教育單位","教育分數","教育單位","ceu"]},col=(headers,names)=>headers.findIndex(header=>names.some(name=>normalize(header)===normalize(name)||normalize(header).includes(normalize(name))));async function load(option){document.querySelector(".ui-dialog-titlebar-close")?.click();select.value=option.value;select.dispatchEvent(new Event("change",{bubbles:true}));for(const[id,value]of[["fromDatePersonalVPDisplay",displayDate(sixStart)],["toDatePersonalVPDisplay",displayDate(end)]]){const input=document.getElementById(id);input.value=value;input.dispatchEvent(new Event("change",{bubbles:true}))}form.querySelector("#button").click();let report=null;for(let attempt=0;attempt<80;attempt++){await wait(250);const frame=document.querySelector("#reportsIFrame");try{const candidate=frame?.contentDocument;if(candidate&&candidate.querySelectorAll("tr").length>3){report=candidate;break}}catch{}}if(!report)throw new Error(`${option.text} 報告載入逾時`);const rows=[...report.querySelectorAll("tr")].map(directCells).filter(row=>row.length);let headerIndex=-1,indexes;for(let i=0;i<rows.length;i++){const candidate={date:col(rows[i],aliases.date),inside:col(rows[i],aliases.inside),outside:col(rows[i],aliases.outside),visitors:col(rows[i],aliases.visitors),oneToOne:col(rows[i],aliases.oneToOne),amount:col(rows[i],aliases.amount),education:col(rows[i],aliases.education)};if(Object.values(candidate).every(index=>index>=0)){headerIndex=i;indexes=candidate;break}}document.querySelector(".ui-dialog-titlebar-close")?.click();if(headerIndex<0)throw new Error(`${option.text} 欄位格式無法辨識`);let inside=0,outside=0,visitors=0,oneToOne=0,amount=0,education=0;for(const row of rows.slice(headerIndex+1)){const date=asDate(row[indexes.date]);if(!date||date<sixStart||date>end)continue;inside+=asNumber(row[indexes.inside]);outside+=asNumber(row[indexes.outside]);oneToOne+=asNumber(row[indexes.oneToOne]);amount+=asNumber(row[indexes.amount]);education+=asNumber(row[indexes.education]);if(date>=fourStart)visitors+=asNumber(row[indexes.visitors])}const weeks=Math.max(1,(end-sixStart)/604800000);return{member:option.text.replace(/\s+/g," ").trim(),trainingPoints:Math.round(education),visitorCount:Math.round(visitors),oneToOneWeeklyAverage:Number((oneToOne/weeks).toFixed(2)),referralWeeklyAverage:Number(((inside+outside)/weeks).toFixed(2)),dreamReferralAmount:Math.round(amount)}}const options=[...select.options].filter(option=>option.value&&option.text.trim()),records=[],errors=[],failedMembers=[];for(const option of options){try{records.push(await load(option))}catch(error){errors.push(error.message||option.text);failedMembers.push(option.text.replace(/\s+/g," ").trim())}}return{records,errors,failedMembers,total:options.length}}});if(result?.error)throw new Error(result.error);return result}
-function usDate(date){return`${String(date.getMonth()+1).padStart(2,"0")}/${String(date.getDate()).padStart(2,"0")}/${date.getFullYear()}`}
-function isoDate(year,month,day){return`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`}
-function parseAttendanceReport(text,endDate){const rows=spreadsheetRows(text);let headers=[],headerIndex=-1,dateStart=-1;for(let i=0;i<rows.length;i++){const first=rows[i].findIndex(v=>/^\d{1,2}\s*月\s*\d{1,2}$/.test(v)||/^\d{1,2}[\/-]\d{1,2}$/.test(v));if(first>=0){headers=rows[i];headerIndex=i;dateStart=first;break}}if(headerIndex<0)throw new Error("無法辨識 PALMS 報表日期欄");const records=[];for(const row of rows.slice(headerIndex+1)){const member=row.slice(0,dateStart).join("").replace(/\s+/g,"").trim();if(!member)continue;for(let col=dateStart;col<headers.length;col++){const code=(row[col]||"").trim().toUpperCase();if(!["P","A","L","M","S"].includes(code))continue;const parts=headers[col].match(/^(\d{1,2})\s*月\s*(\d{1,2})$/)||headers[col].match(/^(\d{1,2})[\/-](\d{1,2})$/);if(!parts)continue;const month=Number(parts[1]),day=Number(parts[2]),year=month>endDate.getMonth()+1?endDate.getFullYear()-1:endDate.getFullYear();records.push({member,date:isoDate(year,month,day),code})}}return records}
-const aliases={member:["會員姓名","會員","membername","member"],education:["教育分數","教育點數","培訓分數","educationpoints","educationunits","ceu"],inside:["內部引薦","內引薦","referralsgiveninside","referralsinside","rgbi"],outside:["外部引薦","外引薦","referralsgivenoutside","referralsoutside","rgbo"],referralAmount:["提供的引薦金額","引薦金額","商機金額","referralamount","referralsgivenamount","businessgiven"],visitors:["來賓","訪客","visitors","visitor"],oneToOne:["一對一","121","1to1","onetoone","onetoones"]};
-const column=(headers,names)=>headers.findIndex(header=>names.some(name=>normalize(header).includes(normalize(name))));
-function parseKpiReport(text){const rows=spreadsheetRows(text);let headerIndex=-1,indexes;for(let i=0;i<rows.length;i++){const candidate={member:column(rows[i],aliases.member),education:column(rows[i],aliases.education),inside:column(rows[i],aliases.inside),outside:column(rows[i],aliases.outside),referralAmount:column(rows[i],aliases.referralAmount),visitors:column(rows[i],aliases.visitors),oneToOne:column(rows[i],aliases.oneToOne)};if(candidate.member>=0&&[candidate.education,candidate.inside,candidate.outside,candidate.referralAmount,candidate.visitors,candidate.oneToOne].filter(value=>value>=0).length>=5){headerIndex=i;indexes=candidate;break}}if(headerIndex<0)throw new Error("無法辨識個人 PALMS 欄位，請確認目前開啟的是個人 PALMS 報告");return rows.slice(headerIndex+1).map(row=>({member:String(row[indexes.member]||"").replace(/\s+/g," ").trim(),education:number(row[indexes.education]),inside:number(row[indexes.inside]),outside:number(row[indexes.outside]),referralAmount:number(row[indexes.referralAmount]),visitors:number(row[indexes.visitors]),oneToOne:number(row[indexes.oneToOne])})).filter(item=>item.member&&!/合計|總計|total/i.test(item.member))}
-async function sessionFor(tab){if(!tab?.url?.includes("bniconnectglobal.com"))throw new Error("請先切到已登入的 BNI Connect 報表頁，再開啟工具");const[{result:sessionText}]=await chrome.scripting.executeScript({target:{tabId:tab.id},world:"MAIN",func:()=>localStorage.getItem("bniconnect:portal:session")});if(!sessionText)throw new Error("找不到 BNI 登入工作階段，請重新登入");const token=JSON.parse(sessionText).access_token;if(!token)throw new Error("BNI 工作階段缺少 Access Token");return{Authorization:`Bearer ${token}`,Accept:"application/json, text/plain, */*"}}
-async function reportContext(tab,headers){const[profileResponse,homeResponse,page]=await Promise.all([fetch("https://api.bniconnectglobal.com/core-api/profile",{headers}),fetch("https://api.bniconnectglobal.com/member-api/v2/home",{headers}),readPageContext(tab.id)]);if(profileResponse.status===401||homeResponse.status===401)throw new Error("BNI 登入已過期，請重新登入");const source={profile:profileResponse.ok?await profileResponse.json():{},home:homeResponse.ok?await homeResponse.json():{}},params={...page.params};params.IdOrg=params.IdOrg||findId(source,"chapter");params.__heading_chapter=params.__heading_chapter||params.IdOrg;params.__heading_region=params.__heading_region||findId(source,"region");params.__heading_country=params.__heading_country||findId(source,"country");return{params,page}}
-async function generateReport(base,start,end,headers){const params=new URLSearchParams({...base,startDate:usDate(start),endDate:usDate(end),ReportType:"EXCEL",execution_type:"SHORT",ShowDetails:"false",__exports_details:"1"});const response=await fetch(`https://api.bniconnectglobal.com/reports-api/reports/v1/generate?${params}`,{headers});if(!response.ok)throw new Error(`BNI 報表讀取失敗（${response.status}）`);return response.text()}
-async function upload(key,payload){const response=await fetch(`${SITE}/api/v1/bni-sync`,{method:"POST",headers:{Authorization:`Bearer ${key}`,"Content-Type":"application/json"},body:JSON.stringify(payload)}),result=await response.json();if(!response.ok)throw new Error(result.error||"同步失敗");return result}
-$("sync").onclick=async()=>{try{$("sync").disabled=true;status("正在讀取 BNI Connect…");const key=$("key").value.trim();if(!key)throw new Error("請先貼上並儲存同步配對金鑰");const[tab]=await chrome.tabs.query({active:true,currentWindow:true}),headers=await sessionFor(tab),{params}=await reportContext(tab,headers),end=new Date(),start=new Date(end.getFullYear(),end.getMonth()-5,1);params.menuName="menu.reports.chapter.palms.attendance";if(!params.IdOrg||!params.__heading_region||!params.__heading_country)throw new Error("無法取得分會識別資料，請保持 PALMS 出席報告開啟");status("正在產生滾動六個月 PALMS…");const records=parseAttendanceReport(await generateReport(params,start,end,headers),end);if(!records.length)throw new Error("報表沒有可同步的 PALMS 紀錄");const result=await upload(key,{records});status(`同步完成：${result.count} 筆出席已更新。`,"ok")}catch(error){status(error.message||"同步失敗","error")}finally{$("sync").disabled=false}};
-$("sync-kpi").onclick=async()=>{try{$("sync-kpi").disabled=true;status("正在逐一彙整全分會個人 PALMS，約需 1–3 分鐘…");const key=$("key").value.trim();if(!key)throw new Error("請先貼上並儲存同步配對金鑰");const[tab]=await chrome.tabs.query({active:true,currentWindow:true});await sessionFor(tab);const batch=await readPersonalPalms(tab.id);if(!batch.records?.length)throw new Error(batch.errors?.[0]||"沒有可同步的個人 PALMS 資料");status(`已讀取 ${batch.records.length}/${batch.total} 位，正在寫入管理系統…`);const result=await upload(key,{kpis:batch.records,failedMembers:batch.failedMembers||[]}),failed=batch.errors?.length||0;status(`同步完成：${result.kpiCount} 位會員已更新${failed?`，${failed} 位維持待補`:""}。`,failed?"error":"ok")}catch(error){status(error.message||"同步失敗","error")}finally{$("sync-kpi").disabled=false}};
+const SITE = "https://bni-changyou-vice-chair.wizoza69311.chatgpt.site";
+const $ = (id) => document.getElementById(id),
+  status = (text, type = "") => {
+    $("status").textContent = text;
+    $("status").className = type;
+  };
+chrome.storage.local.get("syncKey", (data) => {
+  $("key").value = data.syncKey || "";
+});
+$("save").onclick = () => {
+  const syncKey = $("key").value.trim();
+  chrome.storage.local.set({ syncKey }, () =>
+    status(syncKey ? "配對金鑰已安全儲存在這台瀏覽器。" : "金鑰已清除。", "ok"),
+  );
+};
+const normalize = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[\s_\-–—／/()（）:：.]/g, "");
+const number = (value) => {
+  const parsed = Number(String(value || "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+const cellValues = (row) => {
+  const output = [];
+  let cursor = 0;
+  for (const cell of [...row.getElementsByTagNameNS("*", "Cell")]) {
+    const index =
+      cell.getAttributeNS(
+        "urn:schemas-microsoft-com:office:spreadsheet",
+        "Index",
+      ) || cell.getAttribute("ss:Index");
+    if (index) cursor = Number(index) - 1;
+    output[cursor] = (
+      cell.getElementsByTagNameNS("*", "Data")[0]?.textContent || ""
+    ).trim();
+    cursor++;
+  }
+  return output;
+};
+const spreadsheetRows = (text) => {
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  if (xml.querySelector("parsererror"))
+    throw new Error("BNI 回傳的報表格式無法辨識");
+  return [...xml.getElementsByTagNameNS("*", "Row")].map(cellValues);
+};
+function findId(source, key) {
+  const wanted = normalize(key),
+    seen = new Set();
+  function visit(value) {
+    if (!value || typeof value !== "object" || seen.has(value)) return "";
+    seen.add(value);
+    for (const [name, item] of Object.entries(value)) {
+      if (normalize(name).includes(wanted) && /\d{2,}/.test(String(item || "")))
+        return String(item).match(/\d{2,}/)?.[0] || "";
+      const nested = visit(item);
+      if (nested) return nested;
+    }
+    return "";
+  }
+  return visit(source);
+}
+async function readPageContext(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: () => {
+      const params = Object.fromEntries(
+        new URL(location.href).searchParams.entries(),
+      );
+      for (const element of document.querySelectorAll(
+        "input[name],select[name]",
+      )) {
+        if (element.value && !params[element.name])
+          params[element.name] = element.value;
+      }
+      return {
+        params,
+        url: location.href,
+        text: (document.body?.innerText || "").slice(0, 1200),
+      };
+    },
+  });
+  return result || { params: {}, url: "", text: "" };
+}
+async function readPersonalPalms(tabId) {
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: async () => {
+      const form = document.querySelector("#chapter_Personal_VP"),
+        select = document.querySelector("#membershipIdMemberPersonalVP");
+      if (!form || !select)
+        return { error: "請先在報告頁展開『個人 PALMS 報告』" };
+      const end = new Date(),
+        sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1),
+        fourStart = new Date(end);
+      fourStart.setDate(end.getDate() - 27);
+      const displayDate = (date) =>
+          `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`,
+        normalize = (value) =>
+          String(value || "")
+            .replace(/[\s_\-–—／/()（）:：.]/g, "")
+            .toLowerCase(),
+        asNumber = (value) => {
+          const parsed = Number(String(value || "").replace(/[^\d.-]/g, ""));
+          return Number.isFinite(parsed) ? parsed : 0;
+        },
+        asDate = (value) => {
+          const parts = String(value || "").match(
+            /(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/,
+          );
+          return parts
+            ? new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+            : null;
+        },
+        wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        directCells = (row) =>
+          [...row.children]
+            .filter((cell) => cell.tagName === "TH" || cell.tagName === "TD")
+            .map((cell) => (cell.textContent || "").trim());
+      const aliases = {
+          date: ["會議日期", "meetingdate"],
+          inside: ["提供內部引薦", "gi", "referralsgiveninside"],
+          outside: ["提供外部引薦", "go", "referralsgivenoutside"],
+          visitors: ["來賓", "v", "visitors"],
+          oneToOne: ["一對一會面", "121", "onetoone"],
+          amount: [
+            "交易價值",
+            "成交價值",
+            "引薦金額",
+            "tyfcb",
+            "businessvalue",
+          ],
+          education: ["分會教育單位", "教育分數", "教育單位", "ceu"],
+        },
+        col = (headers, names) =>
+          headers.findIndex((header) =>
+            names.some(
+              (name) =>
+                normalize(header) === normalize(name) ||
+                normalize(header).includes(normalize(name)),
+            ),
+          );
+      async function load(option) {
+        document.querySelector(".ui-dialog-titlebar-close")?.click();
+        select.value = option.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        for (const [id, value] of [
+          ["fromDatePersonalVPDisplay", displayDate(sixStart)],
+          ["toDatePersonalVPDisplay", displayDate(end)],
+        ]) {
+          const input = document.getElementById(id);
+          input.value = value;
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        form.querySelector("#button").click();
+        let report = null;
+        for (let attempt = 0; attempt < 80; attempt++) {
+          await wait(250);
+          const frame = document.querySelector("#reportsIFrame");
+          try {
+            const candidate = frame?.contentDocument;
+            if (candidate && candidate.querySelectorAll("tr").length > 3) {
+              report = candidate;
+              break;
+            }
+          } catch {}
+        }
+        if (!report) throw new Error(`${option.text} 報告載入逾時`);
+      let headerRow = null,
+        indexes;
+      for (const candidateRow of report.querySelectorAll("tr")) {
+        const cells = directCells(candidateRow);
+        if (cells.length < 7) continue;
+        const candidate = {
+          date: col(cells, aliases.date),
+          inside: col(cells, aliases.inside),
+          outside: col(cells, aliases.outside),
+          visitors: col(cells, aliases.visitors),
+          oneToOne: col(cells, aliases.oneToOne),
+          amount: col(cells, aliases.amount),
+          education: col(cells, aliases.education),
+        };
+        const positions = Object.values(candidate);
+        if (
+          positions.every((index) => index >= 0) &&
+          new Set(positions).size === positions.length
+        ) {
+          headerRow = candidateRow;
+          indexes = candidate;
+          break;
+        }
+      }
+      const reportTable = headerRow?.closest("table");
+      const tableRows = reportTable ? [...reportTable.rows] : [];
+      const headerIndex = headerRow ? tableRows.indexOf(headerRow) : -1;
+      const rows = tableRows.map(directCells);
+        document.querySelector(".ui-dialog-titlebar-close")?.click();
+        if (headerIndex < 0) throw new Error(`${option.text} 欄位格式無法辨識`);
+        let inside = 0,
+          outside = 0,
+          visitors = 0,
+          oneToOne = 0,
+          amount = 0,
+          education = 0;
+        for (const row of rows.slice(headerIndex + 1)) {
+          const date = asDate(row[indexes.date]);
+          if (!date || date < sixStart || date > end) continue;
+          inside += asNumber(row[indexes.inside]);
+          outside += asNumber(row[indexes.outside]);
+          oneToOne += asNumber(row[indexes.oneToOne]);
+          amount += asNumber(row[indexes.amount]);
+          education += asNumber(row[indexes.education]);
+          if (date >= fourStart) visitors += asNumber(row[indexes.visitors]);
+        }
+        const weeks = Math.max(1, (end - sixStart) / 604800000);
+        return {
+          member: option.text.replace(/\s+/g, " ").trim(),
+          trainingPoints: Math.round(education),
+          visitorCount: Math.round(visitors),
+          oneToOneWeeklyAverage: Number((oneToOne / weeks).toFixed(2)),
+          referralWeeklyAverage: Number(
+            ((inside + outside) / weeks).toFixed(2),
+          ),
+          dreamReferralAmount: Math.round(amount),
+        };
+      }
+      const options = [...select.options].filter(
+          (option) => option.value && option.text.trim(),
+        ),
+        records = [],
+        errors = [],
+        failedMembers = [];
+      for (const option of options) {
+        try {
+          records.push(await load(option));
+        } catch (error) {
+          errors.push(error.message || option.text);
+          failedMembers.push(option.text.replace(/\s+/g, " ").trim());
+        }
+      }
+      return { records, errors, failedMembers, total: options.length };
+    },
+  });
+  if (result?.error) throw new Error(result.error);
+  return result;
+}
+function usDate(date) {
+  return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
+}
+function isoDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+function parseAttendanceReport(text, endDate) {
+  const rows = spreadsheetRows(text);
+  let headers = [],
+    headerIndex = -1,
+    dateStart = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const first = rows[i].findIndex(
+      (v) =>
+        /^\d{1,2}\s*月\s*\d{1,2}$/.test(v) || /^\d{1,2}[\/-]\d{1,2}$/.test(v),
+    );
+    if (first >= 0) {
+      headers = rows[i];
+      headerIndex = i;
+      dateStart = first;
+      break;
+    }
+  }
+  if (headerIndex < 0) throw new Error("無法辨識 PALMS 報表日期欄");
+  const records = [];
+  for (const row of rows.slice(headerIndex + 1)) {
+    const member = row.slice(0, dateStart).join("").replace(/\s+/g, "").trim();
+    if (!member) continue;
+    for (let col = dateStart; col < headers.length; col++) {
+      const code = (row[col] || "").trim().toUpperCase();
+      if (!["P", "A", "L", "M", "S"].includes(code)) continue;
+      const parts =
+        headers[col].match(/^(\d{1,2})\s*月\s*(\d{1,2})$/) ||
+        headers[col].match(/^(\d{1,2})[\/-](\d{1,2})$/);
+      if (!parts) continue;
+      const month = Number(parts[1]),
+        day = Number(parts[2]),
+        year =
+          month > endDate.getMonth() + 1
+            ? endDate.getFullYear() - 1
+            : endDate.getFullYear();
+      records.push({ member, date: isoDate(year, month, day), code });
+    }
+  }
+  return records;
+}
+const aliases = {
+  member: ["會員姓名", "會員", "membername", "member"],
+  education: [
+    "教育分數",
+    "教育點數",
+    "培訓分數",
+    "educationpoints",
+    "educationunits",
+    "ceu",
+  ],
+  inside: [
+    "內部引薦",
+    "內引薦",
+    "referralsgiveninside",
+    "referralsinside",
+    "rgbi",
+  ],
+  outside: [
+    "外部引薦",
+    "外引薦",
+    "referralsgivenoutside",
+    "referralsoutside",
+    "rgbo",
+  ],
+  referralAmount: [
+    "提供的引薦金額",
+    "引薦金額",
+    "商機金額",
+    "referralamount",
+    "referralsgivenamount",
+    "businessgiven",
+  ],
+  visitors: ["來賓", "訪客", "visitors", "visitor"],
+  oneToOne: ["一對一", "121", "1to1", "onetoone", "onetoones"],
+};
+const column = (headers, names) =>
+  headers.findIndex((header) =>
+    names.some((name) => normalize(header).includes(normalize(name))),
+  );
+function parseKpiReport(text) {
+  const rows = spreadsheetRows(text);
+  let headerIndex = -1,
+    indexes;
+  for (let i = 0; i < rows.length; i++) {
+    const candidate = {
+      member: column(rows[i], aliases.member),
+      education: column(rows[i], aliases.education),
+      inside: column(rows[i], aliases.inside),
+      outside: column(rows[i], aliases.outside),
+      referralAmount: column(rows[i], aliases.referralAmount),
+      visitors: column(rows[i], aliases.visitors),
+      oneToOne: column(rows[i], aliases.oneToOne),
+    };
+    if (
+      candidate.member >= 0 &&
+      [
+        candidate.education,
+        candidate.inside,
+        candidate.outside,
+        candidate.referralAmount,
+        candidate.visitors,
+        candidate.oneToOne,
+      ].filter((value) => value >= 0).length >= 5
+    ) {
+      headerIndex = i;
+      indexes = candidate;
+      break;
+    }
+  }
+  if (headerIndex < 0)
+    throw new Error(
+      "無法辨識個人 PALMS 欄位，請確認目前開啟的是個人 PALMS 報告",
+    );
+  return rows
+    .slice(headerIndex + 1)
+    .map((row) => ({
+      member: String(row[indexes.member] || "")
+        .replace(/\s+/g, " ")
+        .trim(),
+      education: number(row[indexes.education]),
+      inside: number(row[indexes.inside]),
+      outside: number(row[indexes.outside]),
+      referralAmount: number(row[indexes.referralAmount]),
+      visitors: number(row[indexes.visitors]),
+      oneToOne: number(row[indexes.oneToOne]),
+    }))
+    .filter((item) => item.member && !/合計|總計|total/i.test(item.member));
+}
+async function sessionFor(tab) {
+  if (!tab?.url?.includes("bniconnectglobal.com"))
+    throw new Error("請先切到已登入的 BNI Connect 報表頁，再開啟工具");
+  const [{ result: sessionText }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: "MAIN",
+    func: () => localStorage.getItem("bniconnect:portal:session"),
+  });
+  if (!sessionText) throw new Error("找不到 BNI 登入工作階段，請重新登入");
+  const token = JSON.parse(sessionText).access_token;
+  if (!token) throw new Error("BNI 工作階段缺少 Access Token");
+  return {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json, text/plain, */*",
+  };
+}
+async function reportContext(tab, headers) {
+  const [profileResponse, homeResponse, page] = await Promise.all([
+    fetch("https://api.bniconnectglobal.com/core-api/profile", { headers }),
+    fetch("https://api.bniconnectglobal.com/member-api/v2/home", { headers }),
+    readPageContext(tab.id),
+  ]);
+  if (profileResponse.status === 401 || homeResponse.status === 401)
+    throw new Error("BNI 登入已過期，請重新登入");
+  const source = {
+      profile: profileResponse.ok ? await profileResponse.json() : {},
+      home: homeResponse.ok ? await homeResponse.json() : {},
+    },
+    params = { ...page.params };
+  params.IdOrg = params.IdOrg || findId(source, "chapter");
+  params.__heading_chapter = params.__heading_chapter || params.IdOrg;
+  params.__heading_region = params.__heading_region || findId(source, "region");
+  params.__heading_country =
+    params.__heading_country || findId(source, "country");
+  return { params, page };
+}
+async function generateReport(base, start, end, headers) {
+  const params = new URLSearchParams({
+    ...base,
+    startDate: usDate(start),
+    endDate: usDate(end),
+    ReportType: "EXCEL",
+    execution_type: "SHORT",
+    ShowDetails: "false",
+    __exports_details: "1",
+  });
+  const response = await fetch(
+    `https://api.bniconnectglobal.com/reports-api/reports/v1/generate?${params}`,
+    { headers },
+  );
+  if (!response.ok) throw new Error(`BNI 報表讀取失敗（${response.status}）`);
+  return response.text();
+}
+async function upload(key, payload) {
+  const response = await fetch(`${SITE}/api/v1/bni-sync`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    }),
+    result = await response.json();
+  if (!response.ok) throw new Error(result.error || "同步失敗");
+  return result;
+}
+$("sync").onclick = async () => {
+  try {
+    $("sync").disabled = true;
+    status("正在讀取 BNI Connect…");
+    const key = $("key").value.trim();
+    if (!key) throw new Error("請先貼上並儲存同步配對金鑰");
+    const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      }),
+      headers = await sessionFor(tab),
+      { params } = await reportContext(tab, headers),
+      end = new Date(),
+      start = new Date(end.getFullYear(), end.getMonth() - 5, 1);
+    params.menuName = "menu.reports.chapter.palms.attendance";
+    if (!params.IdOrg || !params.__heading_region || !params.__heading_country)
+      throw new Error("無法取得分會識別資料，請保持 PALMS 出席報告開啟");
+    status("正在產生滾動六個月 PALMS…");
+    const records = parseAttendanceReport(
+      await generateReport(params, start, end, headers),
+      end,
+    );
+    if (!records.length) throw new Error("報表沒有可同步的 PALMS 紀錄");
+    const result = await upload(key, { records });
+    status(`同步完成：${result.count} 筆出席已更新。`, "ok");
+  } catch (error) {
+    status(error.message || "同步失敗", "error");
+  } finally {
+    $("sync").disabled = false;
+  }
+};
+$("sync-kpi").onclick = async () => {
+  try {
+    $("sync-kpi").disabled = true;
+    status("正在逐一彙整全分會個人 PALMS，約需 1–3 分鐘…");
+    const key = $("key").value.trim();
+    if (!key) throw new Error("請先貼上並儲存同步配對金鑰");
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    await sessionFor(tab);
+    const batch = await readPersonalPalms(tab.id);
+    if (!batch.records?.length)
+      throw new Error(batch.errors?.[0] || "沒有可同步的個人 PALMS 資料");
+    status(
+      `已讀取 ${batch.records.length}/${batch.total} 位，正在寫入管理系統…`,
+    );
+    const result = await upload(key, {
+        kpis: batch.records,
+        failedMembers: batch.failedMembers || [],
+      }),
+      failed = batch.errors?.length || 0;
+    status(
+      `同步完成：${result.kpiCount} 位會員已更新${failed ? `，${failed} 位維持待補` : ""}。`,
+      failed ? "error" : "ok",
+    );
+  } catch (error) {
+    status(error.message || "同步失敗", "error");
+  } finally {
+    $("sync-kpi").disabled = false;
+  }
+};
