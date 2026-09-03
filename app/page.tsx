@@ -564,8 +564,8 @@ export default function Home() {
   }
   function updateActiveMemberKpi(field:keyof Pick<MemberKpi,"trainingPoints"|"visitorCount"|"oneToOneWeeklyAverage"|"referralWeeklyAverage"|"dreamReferralAmount">,value:string){
     if(!activeMemberProfile)return;
-    const nextValue=value===""?null:Number(value),existing=memberKpis.find(item=>item.member===activeMemberProfile.name),next={...(existing||activeMemberKpi),member:activeMemberProfile.name,[field]:nextValue};
-    setMemberKpis(records=>existing?records.map(item=>item.member===activeMemberProfile.name?next:item):[...records,next]);
+    const memberKey=normalizeMemberName(activeMemberProfile.name),nextValue=value===""?null:Number(value),existing=memberKpis.find(item=>normalizeMemberName(item.member)===memberKey),next={...(existing||activeMemberKpi),member:activeMemberProfile.name,[field]:nextValue};
+    setMemberKpis(records=>existing?records.map(item=>normalizeMemberName(item.member)===memberKey?next:item):[...records,next]);
   }
   async function saveActiveMemberKpi(){
     if(!activeMemberProfile)return;
