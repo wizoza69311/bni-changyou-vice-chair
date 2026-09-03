@@ -69,6 +69,7 @@ type Visitor = {
   receptionOwner?: string;
   followUpDate?: string;
   logs?: { date: string; owner: string; text: string }[];
+  agendaExcludedDates?: string[];
   updatedAt?:string;
 };
 type VisitorStage = "待確認" | "有意願" | "已簽單" | "訪談中" | "待投票" | "待繳費" | "已入會" | "持續追蹤" | "不追蹤";
@@ -491,7 +492,7 @@ export default function Home() {
   }),[attendanceRecords,memberWindow,departedMembers,renewals,qualityCases,careAssignmentMap]);
   const filteredMemberProfiles=memberProfiles.filter(profile=>profile.name.includes(memberSearch.trim())&&(!hideClearMembers||profile.concerns.length>0));
   const activeMemberProfile=memberProfiles.find(profile=>profile.name===selectedMember)||filteredMemberProfiles[0]||memberProfiles[0];
-  const activeVisitors=visitors.filter((visitor)=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會");
+  const activeVisitors=visitors.filter((visitor)=>visitor.visitDate===visitorRelayDate&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&!visitor.agendaExcludedDates?.includes(visitorRelayDate));
   const visitorDateGroups=useMemo(()=>Object.entries(visitors.reduce<Record<string,Visitor[]>>((groups,visitor)=>{const key=visitor.visitDate||"日期待補";(groups[key]||=[]).push(visitor);return groups},{})).sort(([a],[b])=>a==="日期待補"?1:b==="日期待補"?-1:b.localeCompare(a)),[visitors]);
   function visitorOverdue(visitor:Visitor){if(!visitor.visitDate)return "";const days=Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitor.visitDate}T00:00:00`).getTime())/86400000);if(visitor.stage==="已簽單"&&days>3)return "訪談逾期";if(visitor.stage==="訪談中"&&days>4)return "投票逾期";if(visitor.stage==="待投票"&&days>7)return "通知逾期";if(visitor.stage==="待繳費"&&days>14)return "付款逾期";return ""}
   const trackedRenewals = renewals.filter((renewal) =>
@@ -616,7 +617,7 @@ export default function Home() {
     setVisitors(next);
     patchRecord("visitor",id,changes);
   }
-  function deleteVisitor(visitor:Visitor){if(!window.confirm(`確定要刪除來賓「${visitor.name}」嗎？`))return;const next=visitors.filter(item=>item.id!==visitor.id);setVisitors(next);patchRecord("visitor",visitor.id,{},"delete");flash(`${visitor.name} 已從本週來賓移除`)}
+  function removeVisitorFromAgenda(visitor:Visitor){if(!window.confirm(`確定要將來賓「${visitor.name}」從 ${fmt(visitorRelayDate)} 議程移除嗎？\n來賓追蹤資料與聯絡紀錄會完整保留。`))return;const agendaExcludedDates=[...new Set([...(visitor.agendaExcludedDates||[]),visitorRelayDate])];updateVisitor(visitor.id,{agendaExcludedDates});flash(`${visitor.name} 已從本週議程移除，追蹤資料仍保留`)}
   function addVisitorLog(visitor:Visitor){const text=visitorLogDraft[visitor.id]?.trim();if(!text)return;const nextLogs=[...(visitor.logs||[]),{date:todayKey,owner:visitor.owner||"未指派",text}];updateVisitor(visitor.id,{logs:nextLogs,note:text});setVisitorLogDraft({...visitorLogDraft,[visitor.id]:""});flash("追蹤紀錄已新增")}
   function addVisitor(){if(!visitorDraft.name.trim()||!visitorDraft.email.trim()){flash("請填寫來賓姓名與 Email");return}const visitor={id:Date.now(),name:visitorDraft.name.trim(),email:visitorDraft.email.trim(),inviter:visitorDraft.inviter.trim()||"現場新增",profession:visitorDraft.profession.trim()||"待補充",attendance:"預計出席",interest:"待確認",owner:"",note:"",stage:"待確認",visitDate:todayKey,receptionOwner:"",followUpDate:"",logs:[]} as Visitor;setVisitors(current=>[...current,visitor]);setVisitorDraft({name:"",email:"",inviter:"",profession:""});patchRecord("visitor",visitor.id,visitor as unknown as Record<string,unknown>,"create");flash("臨時來賓已加入本週議程")}
   function visitorAddForm(){return <div className="quick-visitor-add"><div><b>臨時新增來賓</b><small>姓名與 Email 為必填</small></div><input value={visitorDraft.name} onChange={(e)=>setVisitorDraft({...visitorDraft,name:e.target.value})} placeholder="來賓姓名＊"/><input type="email" value={visitorDraft.email} onChange={(e)=>setVisitorDraft({...visitorDraft,email:e.target.value})} placeholder="Email＊"/><input value={visitorDraft.inviter} onChange={(e)=>setVisitorDraft({...visitorDraft,inviter:e.target.value})} placeholder="邀請人"/><input value={visitorDraft.profession} onChange={(e)=>setVisitorDraft({...visitorDraft,profession:e.target.value})} placeholder="專業類別"/><button onClick={addVisitor}>＋ 新增</button></div>}
@@ -673,7 +674,7 @@ export default function Home() {
           checked: checkedAgenda,
           notes: meetingNotes,
           renewals: trackedRenewals,
-          visitors,
+          visitors: activeVisitors,
         }),
       });
       const data = await response.json();
@@ -704,7 +705,7 @@ export default function Home() {
       const map = new Map(archive.renewals.map((item) => [item.id, item]));
       setRenewals((current) => current.map((item) => map.get(item.id) || item));
     }
-    if (archive.visitors?.length) setVisitors(archive.visitors);
+    setVisitorRelayDate(archive.meetingDate);
     setMeetingReady(true);
     setView("agenda");
     flash(`已重新開啟 ${archive.meetingDate} 會議`);
@@ -1060,7 +1061,7 @@ export default function Home() {
                                   <small>來賓日期：{visitor.visitDate?fmt(visitor.visitDate):"尚未設定"}</small>
                                   {visitorOverdue(visitor)&&<em className="visitor-overdue">{visitorOverdue(visitor)}</em>}
                                 </div>
-                                <button className="visitor-delete" type="button" onClick={()=>deleteVisitor(visitor)}>刪除</button>
+                                <button className="visitor-delete" type="button" onClick={()=>removeVisitorFromAgenda(visitor)}>從議程移除</button>
                               </div>
                               <div className="visitor-fields">
                                 <label>
