@@ -115,6 +115,11 @@ async function readPersonalPalms(tabId) {
             : null;
         },
         wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        cleanMemberName = (value) => {
+          const text = String(value || "").replace(/\s+/g, " ").trim();
+          const chinese = text.match(/[\u3400-\u9fff]+/g)?.join("") || "";
+          return chinese.length >= 2 ? chinese : text;
+        },
         directCells = (row) =>
           [...row.children]
             .filter((cell) => cell.tagName === "TH" || cell.tagName === "TD")
@@ -225,7 +230,7 @@ async function readPersonalPalms(tabId) {
         }
         const weeks = Math.max(1, (end - sixStart) / 604800000);
         const record = {
-          member: option.text.replace(/\s+/g, " ").trim(),
+          member: cleanMemberName(option.text),
           trainingPoints: Math.round(education),
           visitorCount: Math.round(visitors),
           oneToOneWeeklyAverage: Number((oneToOne / weeks).toFixed(2)),
@@ -251,11 +256,20 @@ async function readPersonalPalms(tabId) {
         errors = [],
         failedMembers = [];
       for (const option of options) {
-        try {
-          records.push(await load(option));
-        } catch (error) {
-          errors.push(error.message || option.text);
-          failedMembers.push(option.text.replace(/\s+/g, " ").trim());
+        let lastError;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            records.push(await load(option));
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            await wait(500);
+          }
+        }
+        if (lastError) {
+          errors.push(lastError.message || option.text);
+          failedMembers.push(cleanMemberName(option.text));
         }
       }
       return { records, errors, failedMembers, total: options.length };
@@ -518,7 +532,7 @@ $("sync-kpi").onclick = async () => {
       }),
       failed = batch.errors?.length || 0;
     status(
-      `同步完成：${result.kpiCount} 位會員已更新${failed ? `，${failed} 位維持待補` : ""}。`,
+      `同步完成：${result.kpiCount} 位會員已更新${failed ? `，${failed} 位維持待補（${(batch.failedMembers || []).join("、")}）` : ""}。`,
       failed ? "error" : "ok",
     );
   } catch (error) {
