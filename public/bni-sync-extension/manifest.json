@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BNI 長佑 PALMS 同步",
-  "version": "1.0.0",
-  "description": "從已登入的 BNI Connect 安全同步滾動六個月 PALMS 到副主席管理系統。",
+  "version": "1.1.0",
+  "description": "從已登入的 BNI Connect 安全同步出席與個人 PALMS KPI 到副主席管理系統。",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://www.bniconnectglobal.com/*",
@@ -10,7 +10,7 @@
     "https://bni-changyou-vice-chair.wizoza69311.chatgpt.site/*"
   ],
   "action": {
-    "default_title": "同步 PALMS",
+    "default_title": "同步 PALMS 與 KPI",
     "default_popup": "popup.html"
   }
 }

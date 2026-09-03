@@ -159,13 +159,14 @@ const worker = {
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
       const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>();
       if(!bearer||!credential?.keyHash||digest!==credential.keyHash)return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
-      const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[];
+      const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],kpis=Array.isArray(body.kpis)?body.kpis:[];
       const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code))).map((x:any)=>({member:String(x.member).trim(),date:String(x.date),code:String(x.code)}));
-      if(valid.length<1)return respond({error:"沒有可匯入的 PALMS 紀錄"},400);
-      const unique=Array.from(new Map(valid.map(item=>[`${item.member}|${item.date}`,item])).values()),now=new Date().toISOString();
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
-      await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(unique),now).run();
-      return respond({ok:true,count:unique.length,updatedAt:now});
+      const validKpis=kpis.filter((x:any)=>x&&typeof x.member==="string"&&String(x.member).trim()&&[x.visitorCount,x.oneToOneWeeklyAverage,x.referralWeeklyAverage].every(value=>Number.isFinite(Number(value))&&Number(value)>=0)).map((x:any)=>({member:String(x.member).trim(),visitorCount:Math.round(Number(x.visitorCount)),oneToOneWeeklyAverage:Number(x.oneToOneWeeklyAverage),referralWeeklyAverage:Number(x.referralWeeklyAverage)}));
+      if(valid.length<1&&validKpis.length<1)return respond({error:"沒有可匯入的 PALMS 或 KPI 紀錄"},400);
+      const unique=Array.from(new Map(valid.map(item=>[`${item.member}|${item.date}`,item])).values()),uniqueKpis=Array.from(new Map(validKpis.map(item=>[item.member.replace(/\s+/g,""),item])).values()),now=new Date().toISOString();
+      if(unique.length){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(unique),now).run()}
+      if(uniqueKpis.length){await env.DB.batch(uniqueKpis.map(item=>env.DB.prepare(`INSERT INTO member_kpi_state (member,visitor_count,one_to_one_weekly_average,referral_weekly_average,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,updated_at=excluded.updated_at`).bind(item.member,item.visitorCount,item.oneToOneWeeklyAverage,item.referralWeeklyAverage,now)))}
+      return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,updatedAt:now});
     }
 
     if(url.pathname==="/api-docs/groups"){
