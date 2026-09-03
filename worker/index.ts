@@ -82,19 +82,20 @@ const worker = {
       if(!env.DB)return apiJson({error:"KPI 資料庫尚未啟用"},503);
       const selectSql=`SELECT member, training_points AS trainingPoints, visitor_count AS visitorCount, one_to_one_weekly_average AS oneToOneWeeklyAverage, referral_weekly_average AS referralWeeklyAverage, dream_referral_amount AS dreamReferralAmount, updated_at AS updatedAt FROM member_kpi_state`;
       if(request.method==="GET"){
-        const result=await env.DB.prepare(selectSql).all();
-        return apiJson({records:result.results||[]});
+        const result=await env.DB.prepare(`${selectSql} ORDER BY updated_at DESC`).all(),rows=(result.results||[]) as Array<Record<string,unknown>>,records=Array.from(new Map(rows.map(row=>[String(row.member||"").replace(/\s+/g,""),row])).values());
+        return apiJson({records});
       }
       if(request.method==="POST"){
         const body=await request.json() as Record<string,unknown>,member=String(body.member||"").trim(),baseUpdatedAt=String(body.baseUpdatedAt||"");
         if(!member)return apiJson({error:"請選擇會員"},400);
-        const current=await env.DB.prepare(`${selectSql} WHERE member=?`).bind(member).first<Record<string,unknown>>();
+        const current=await env.DB.prepare(`${selectSql} WHERE replace(member,' ','')=replace(?,' ','') ORDER BY updated_at DESC LIMIT 1`).bind(member).first<Record<string,unknown>>();
         if(baseUpdatedAt&&current?.updatedAt&&baseUpdatedAt!==String(current.updatedAt))return apiJson({error:"此會員 KPI 已被其他畫面更新",record:current},409);
         const numberOrNull=(key:string,integer=false)=>{const value=body[key];if(value===null||value===""||typeof value==="undefined")return null;const number=Number(value);return Number.isFinite(number)&&number>=0?(integer?Math.round(number):number):NaN};
         const trainingPoints=numberOrNull("trainingPoints",true),visitorCount=numberOrNull("visitorCount",true),oneToOneWeeklyAverage=numberOrNull("oneToOneWeeklyAverage"),referralWeeklyAverage=numberOrNull("referralWeeklyAverage"),dreamReferralAmount=numberOrNull("dreamReferralAmount",true);
         if([trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount].some(Number.isNaN))return apiJson({error:"KPI 數值必須為零或正數"},400);
         const updatedAt=new Date().toISOString();
         await env.DB.prepare(`INSERT INTO member_kpi_state (member,training_points,visitor_count,one_to_one_weekly_average,referral_weekly_average,dream_referral_amount,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET training_points=excluded.training_points,visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,dream_referral_amount=excluded.dream_referral_amount,updated_at=excluded.updated_at`).bind(member,trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount,updatedAt).run();
+        await env.DB.prepare(`DELETE FROM member_kpi_state WHERE replace(member,' ','')=replace(?,' ','') AND member<>?`).bind(member,member).run();
         return apiJson({ok:true,record:{member,trainingPoints,visitorCount,oneToOneWeeklyAverage,referralWeeklyAverage,dreamReferralAmount,updatedAt}});
       }
       return apiJson({error:"不支援的 KPI 資料操作"},405);
@@ -165,7 +166,7 @@ const worker = {
       if(valid.length<1&&validKpis.length<1)return respond({error:"沒有可匯入的 PALMS 或 KPI 紀錄"},400);
       const unique=Array.from(new Map(valid.map(item=>[`${item.member}|${item.date}`,item])).values()),uniqueKpis=Array.from(new Map(validKpis.map(item=>[item.member.replace(/\s+/g,""),item])).values()),now=new Date().toISOString();
       if(unique.length){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(unique),now).run()}
-      if(uniqueKpis.length){await env.DB.batch(uniqueKpis.map(item=>env.DB.prepare(`INSERT INTO member_kpi_state (member,training_points,visitor_count,one_to_one_weekly_average,referral_weekly_average,dream_referral_amount,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET training_points=excluded.training_points,visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,dream_referral_amount=excluded.dream_referral_amount,updated_at=excluded.updated_at`).bind(item.member,item.trainingPoints,item.visitorCount,item.oneToOneWeeklyAverage,item.referralWeeklyAverage,item.dreamReferralAmount,now)))}
+      if(uniqueKpis.length){await env.DB.batch(uniqueKpis.flatMap(item=>[env.DB.prepare(`INSERT INTO member_kpi_state (member,training_points,visitor_count,one_to_one_weekly_average,referral_weekly_average,dream_referral_amount,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET training_points=excluded.training_points,visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,dream_referral_amount=excluded.dream_referral_amount,updated_at=excluded.updated_at`).bind(item.member,item.trainingPoints,item.visitorCount,item.oneToOneWeeklyAverage,item.referralWeeklyAverage,item.dreamReferralAmount,now),env.DB.prepare(`DELETE FROM member_kpi_state WHERE replace(member,' ','')=replace(?,' ','') AND member<>?`).bind(item.member,item.member)]))}
       if(failedMembers.length){await env.DB.batch(failedMembers.map(member=>env.DB.prepare(`UPDATE member_kpi_state SET training_points=NULL,visitor_count=NULL,one_to_one_weekly_average=NULL,referral_weekly_average=NULL,dream_referral_amount=NULL,updated_at=? WHERE replace(member,' ','')=replace(?,' ','')`).bind(now,member)))}
       return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,updatedAt:now});
     }
