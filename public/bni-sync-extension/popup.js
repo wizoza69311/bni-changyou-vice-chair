@@ -143,7 +143,10 @@ async function readPersonalPalms(tabId) {
             ),
           );
       async function load(option) {
+        const oldFrame = document.querySelector("#reportsIFrame");
         document.querySelector(".ui-dialog-titlebar-close")?.click();
+        for (let attempt = 0; oldFrame?.isConnected && attempt < 20; attempt++)
+          await wait(100);
         select.value = option.value;
         select.dispatchEvent(new Event("change", { bubbles: true }));
         for (const [id, value] of [
@@ -161,7 +164,13 @@ async function readPersonalPalms(tabId) {
           const frame = document.querySelector("#reportsIFrame");
           try {
             const candidate = frame?.contentDocument;
-            if (candidate && candidate.querySelectorAll("tr").length > 3) {
+            const reportText = normalize(candidate?.body?.textContent);
+            const memberText = normalize(option.text);
+            if (
+              candidate &&
+              candidate.querySelectorAll("tr").length > 3 &&
+              reportText.includes(memberText)
+            ) {
               report = candidate;
               break;
             }
@@ -215,7 +224,7 @@ async function readPersonalPalms(tabId) {
           if (date >= fourStart) visitors += asNumber(row[indexes.visitors]);
         }
         const weeks = Math.max(1, (end - sixStart) / 604800000);
-        return {
+        const record = {
           member: option.text.replace(/\s+/g, " ").trim(),
           trainingPoints: Math.round(education),
           visitorCount: Math.round(visitors),
@@ -225,6 +234,15 @@ async function readPersonalPalms(tabId) {
           ),
           dreamReferralAmount: Math.round(amount),
         };
+        if (
+          record.trainingPoints > 500 ||
+          record.visitorCount > 500 ||
+          record.oneToOneWeeklyAverage > 200 ||
+          record.referralWeeklyAverage > 200 ||
+          record.dreamReferralAmount > 10000000000
+        )
+          throw new Error(`${option.text} 數值異常，已略過避免寫入錯誤資料`);
+        return record;
       }
       const options = [...select.options].filter(
           (option) => option.value && option.text.trim(),
