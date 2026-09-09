@@ -58,7 +58,6 @@ export const qualityState = sqliteTable("quality_state", {
   updatedAt: text("updated_at").notNull(),
 });
 export const attendanceState=sqliteTable("attendance_state",{id:integer("id").primaryKey(),records:text("records").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
-export const memberRosterState=sqliteTable("member_roster_state",{id:integer("id").primaryKey(),members:text("members").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
 
 export const memberKpiState = sqliteTable("member_kpi_state", {
   member: text("member").primaryKey(),
