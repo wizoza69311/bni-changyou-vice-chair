@@ -160,15 +160,33 @@ const worker = {
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
       const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>();
       if(!bearer||!credential?.keyHash||digest!==credential.keyHash)return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
-      const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],kpis=Array.isArray(body.kpis)?body.kpis:[],failedMembers=Array.isArray(body.failedMembers)?body.failedMembers.map(value=>String(value).trim()).filter(Boolean):[];
+      const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],kpis=Array.isArray(body.kpis)?body.kpis:[],members=Array.isArray(body.members)?body.members.map(value=>String(value).trim()).filter(Boolean):[],renewalRows=Array.isArray(body.renewals)?body.renewals:[],failedMembers=Array.isArray(body.failedMembers)?body.failedMembers.map(value=>String(value).trim()).filter(Boolean):[];
       const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code))).map((x:any)=>({member:String(x.member).trim(),date:String(x.date),code:String(x.code)}));
       const validKpis=kpis.filter((x:any)=>x&&typeof x.member==="string"&&String(x.member).trim()&&[x.trainingPoints,x.visitorCount,x.oneToOneWeeklyAverage,x.referralWeeklyAverage,x.dreamReferralAmount].every(value=>Number.isFinite(Number(value))&&Number(value)>=0)).map((x:any)=>({member:String(x.member).trim(),trainingPoints:Math.round(Number(x.trainingPoints)),visitorCount:Math.round(Number(x.visitorCount)),oneToOneWeeklyAverage:Number(x.oneToOneWeeklyAverage),referralWeeklyAverage:Number(x.referralWeeklyAverage),dreamReferralAmount:Math.round(Number(x.dreamReferralAmount))}));
-      if(valid.length<1&&validKpis.length<1)return respond({error:"沒有可匯入的 PALMS 或 KPI 紀錄"},400);
+      const validMembers=Array.from(new Set(members.map(value=>String(value).replace(/\s+/g,"")).filter(value=>value.length>=2))),validRenewals=renewalRows.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.expiryDate))).map((x:any)=>({member:String(x.member).trim(),expiryDate:String(x.expiryDate)}));
+      if(valid.length<1&&validKpis.length<1&&validMembers.length<10)return respond({error:"沒有可匯入的會員、PALMS 或 KPI 紀錄"},400);
       const unique=Array.from(new Map(valid.map(item=>[`${item.member}|${item.date}`,item])).values()),uniqueKpis=Array.from(new Map(validKpis.map(item=>[item.member.replace(/\s+/g,""),item])).values()),now=new Date().toISOString();
       if(unique.length){await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(unique),now).run()}
       if(uniqueKpis.length){await env.DB.batch(uniqueKpis.flatMap(item=>[env.DB.prepare(`INSERT INTO member_kpi_state (member,training_points,visitor_count,one_to_one_weekly_average,referral_weekly_average,dream_referral_amount,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(member) DO UPDATE SET training_points=excluded.training_points,visitor_count=excluded.visitor_count,one_to_one_weekly_average=excluded.one_to_one_weekly_average,referral_weekly_average=excluded.referral_weekly_average,dream_referral_amount=excluded.dream_referral_amount,updated_at=excluded.updated_at`).bind(item.member,item.trainingPoints,item.visitorCount,item.oneToOneWeeklyAverage,item.referralWeeklyAverage,item.dreamReferralAmount,now),env.DB.prepare(`DELETE FROM member_kpi_state WHERE replace(member,' ','')=replace(?,' ','') AND member<>?`).bind(item.member,item.member)]))}
       if(failedMembers.length){await env.DB.batch(failedMembers.map(member=>env.DB.prepare(`UPDATE member_kpi_state SET training_points=NULL,visitor_count=NULL,one_to_one_weekly_average=NULL,referral_weekly_average=NULL,dream_referral_amount=NULL,updated_at=? WHERE replace(member,' ','')=replace(?,' ','')`).bind(now,member)))}
-      return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,updatedAt:now});
+      if(validMembers.length>=10){
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_roster_state (id INTEGER PRIMARY KEY CHECK (id=1), members TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+        await env.DB.prepare(`INSERT INTO member_roster_state (id,members,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET members=excluded.members,updated_at=excluded.updated_at`).bind(JSON.stringify(validMembers),now).run();
+      }
+      if(validRenewals.length){
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS practice_state (id INTEGER PRIMARY KEY CHECK (id=1), renewals TEXT NOT NULL DEFAULT '[]', tasks TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+        const row=await env.DB.prepare(`SELECT renewals FROM practice_state WHERE id=1`).first<{renewals:string}>(),current=JSON.parse(row?.renewals||"[]") as Array<Record<string,unknown>>,byName=new Map(current.map(item=>[String(item.name||"").replace(/\s+/g,""),item]));
+        for(const item of validRenewals){const key=item.member.replace(/\s+/g,""),existing=byName.get(key),daysLeft=Math.ceil((new Date(`${item.expiryDate}T00:00:00+08:00`).getTime()-Date.now())/86400000),fallbackId=Array.from(`${key}|${item.expiryDate}`).reduce((sum,char)=>(sum*31+char.charCodeAt(0))>>>0,7);byName.set(key,{id:Number(existing?.id)||fallbackId,name:item.member,expiryDate:item.expiryDate,daysLeft,status:existing?.status|| (daysLeft<=14?"待繳費":"待訪談"),owner:existing?.owner||"",note:existing?.note||"",updatedAt:now})}
+        const next=[...byName.values()];await env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,?,'[]',?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals,updated_at=excluded.updated_at`).bind(JSON.stringify(next),now).run();
+      }
+      return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,memberCount:validMembers.length,renewalCount:validRenewals.length,updatedAt:now});
+    }
+
+    if(url.pathname==="/api/member-roster"&&request.method==="GET"){
+      if(!env.DB)return apiJson({members:[],updatedAt:null});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_roster_state (id INTEGER PRIMARY KEY CHECK (id=1), members TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const row=await env.DB.prepare(`SELECT members,updated_at AS updatedAt FROM member_roster_state WHERE id=1`).first<{members:string;updatedAt:string}>();
+      return apiJson({members:JSON.parse(row?.members||"[]"),updatedAt:row?.updatedAt||null});
     }
 
     if(url.pathname==="/api-docs/groups"){

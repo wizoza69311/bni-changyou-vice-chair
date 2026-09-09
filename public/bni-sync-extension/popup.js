@@ -7,11 +7,21 @@ const $ = (id) => document.getElementById(id),
 chrome.storage.local.get("syncKey", (data) => {
   $("key").value = data.syncKey || "";
 });
+chrome.storage.local.get(["autoSync", "lastSyncResult"], (data) => {
+  $("auto-sync").checked = Boolean(data.autoSync);
+  if (data.lastSyncResult) $("last-result").textContent = data.lastSyncResult;
+});
 $("save").onclick = () => {
   const syncKey = $("key").value.trim();
   chrome.storage.local.set({ syncKey }, () =>
     status(syncKey ? "配對金鑰已安全儲存在這台瀏覽器。" : "金鑰已清除。", "ok"),
   );
+};
+$("auto-sync").onchange = () => {
+  const enabled = $("auto-sync").checked;
+  chrome.storage.local.set({ autoSync: enabled });
+  chrome.runtime.sendMessage({ type: "set-schedule", enabled });
+  status(enabled ? "每週自動更新已開啟。" : "每週自動更新已關閉。", "ok");
 };
 const normalize = (value) =>
   String(value || "")
@@ -384,6 +394,8 @@ function parseAttendanceReport(text, endDate) {
 }
 const aliases = {
   member: ["會員姓名", "會員", "membername", "member"],
+  surname: ["姓氏", "lastname", "surname"],
+  givenName: ["名字", "firstname", "givenname"],
   education: [
     "教育分數",
     "教育點數",
@@ -391,6 +403,7 @@ const aliases = {
     "educationpoints",
     "educationunits",
     "ceu",
+    "分會教育單位",
   ],
   inside: [
     "內部引薦",
@@ -413,6 +426,7 @@ const aliases = {
     "referralamount",
     "referralsgivenamount",
     "businessgiven",
+    "交易價值",
   ],
   visitors: ["來賓", "訪客", "visitors", "visitor"],
   oneToOne: ["一對一", "121", "1to1", "onetoone", "onetoones"],
@@ -428,6 +442,8 @@ function parseKpiReport(text) {
   for (let i = 0; i < rows.length; i++) {
     const candidate = {
       member: column(rows[i], aliases.member),
+      surname: column(rows[i], aliases.surname),
+      givenName: column(rows[i], aliases.givenName),
       education: column(rows[i], aliases.education),
       inside: column(rows[i], aliases.inside),
       outside: column(rows[i], aliases.outside),
@@ -436,7 +452,8 @@ function parseKpiReport(text) {
       oneToOne: column(rows[i], aliases.oneToOne),
     };
     if (
-      candidate.member >= 0 &&
+      (candidate.member >= 0 ||
+        (candidate.surname >= 0 && candidate.givenName >= 0)) &&
       [
         candidate.education,
         candidate.inside,
@@ -458,7 +475,11 @@ function parseKpiReport(text) {
   return rows
     .slice(headerIndex + 1)
     .map((row) => ({
-      member: String(row[indexes.member] || "")
+      member: String(
+        indexes.member >= 0
+          ? row[indexes.member] || ""
+          : `${row[indexes.surname] || ""}${row[indexes.givenName] || ""}`,
+      )
         .replace(/\s+/g, " ")
         .trim(),
       education: number(row[indexes.education]),
@@ -485,6 +506,40 @@ async function sessionFor(tab) {
     Authorization: `Bearer ${token}`,
     Accept: "application/json, text/plain, */*",
   };
+}
+function parseDateValue(value) {
+  const text = String(value || "").trim();
+  let match = text.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (match) return isoDate(Number(match[1]), Number(match[2]), Number(match[3]));
+  match = text.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+  if (match) return isoDate(Number(match[3]), Number(match[2]), Number(match[1]));
+  return "";
+}
+function parseRosterReport(text) {
+  const rows = spreadsheetRows(text), expiryAliases = ["到期日", "續約日", "會籍到期", "會員到期", "expirationdate", "expirydate", "renewaldate"];
+  let headerIndex = -1, indexes;
+  for (let i = 0; i < rows.length; i++) {
+    const candidate = {
+      member: column(rows[i], aliases.member),
+      surname: column(rows[i], aliases.surname),
+      givenName: column(rows[i], aliases.givenName),
+      expiry: column(rows[i], expiryAliases),
+    };
+    if (candidate.member >= 0 || (candidate.surname >= 0 && candidate.givenName >= 0)) {
+      headerIndex = i; indexes = candidate; break;
+    }
+  }
+  if (headerIndex < 0) throw new Error("無法辨識會員名冊欄位");
+  return rows.slice(headerIndex + 1).map((row) => {
+    const member = String(indexes.member >= 0 ? row[indexes.member] || "" : `${row[indexes.surname] || ""}${row[indexes.givenName] || ""}`).replace(/\s+/g, " ").trim();
+    return { member, expiryDate: indexes.expiry >= 0 ? parseDateValue(row[indexes.expiry]) : "" };
+  }).filter((item) => item.member && !/合計|總計|total/i.test(item.member));
+}
+async function bniTab() {
+  const tabs = await chrome.tabs.query({});
+  const tab = tabs.find((item) => item.url?.includes("bniconnectglobal.com/web/secure"));
+  if (!tab) throw new Error("找不到已登入的 BNI Connect 頁面，請先登入並保持頁面開啟");
+  return tab;
 }
 async function reportContext(tab, headers) {
   const [profileResponse, homeResponse, page] = await Promise.all([
@@ -523,6 +578,65 @@ async function generateReport(base, start, end, headers) {
   if (!response.ok) throw new Error(`BNI 報表讀取失敗（${response.status}）`);
   return response.text();
 }
+async function readSummaryKpis(tab) {
+  const headers = await sessionFor(tab);
+  const { params } = await reportContext(tab, headers);
+  if (!params.IdOrg || !params.__heading_region || !params.__heading_country)
+    throw new Error("無法取得分會報表識別資料");
+  const end = new Date(),
+    sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1),
+    fourStart = new Date(end);
+  fourStart.setDate(end.getDate() - 27);
+  const base = {
+    menuName: "menu.reports.chapter.palms.summary",
+    IdOrg: params.IdOrg,
+    __heading_chapter: params.__heading_chapter || params.IdOrg,
+    __heading_region: params.__heading_region,
+    __heading_country: params.__heading_country,
+    __orientation: "ltr",
+  };
+  const [sixText, fourText] = await Promise.all([
+    generateReport(base, sixStart, end, headers),
+    generateReport(base, fourStart, end, headers),
+  ]);
+  const six = parseKpiReport(sixText),
+    four = parseKpiReport(fourText),
+    visitors = new Map(four.map((item) => [normalize(item.member), item.visitors])),
+    weeks = Math.max(1, (end - sixStart) / 604800000);
+  return six.map((item) => ({
+    member: item.member,
+    trainingPoints: Math.round(item.education),
+    visitorCount: Math.round(visitors.get(normalize(item.member)) || 0),
+    oneToOneWeeklyAverage: Number((item.oneToOne / weeks).toFixed(2)),
+    referralWeeklyAverage: Number(((item.inside + item.outside) / weeks).toFixed(2)),
+    dreamReferralAmount: Math.round(item.referralAmount),
+  }));
+}
+async function readRosterAndRenewals(tab) {
+  const headers = await sessionFor(tab), { params } = await reportContext(tab, headers);
+  if (!params.IdOrg || !params.__heading_region || !params.__heading_country)
+    throw new Error("無法取得分會報表識別資料");
+  const end = new Date(), start = new Date(end.getFullYear(), end.getMonth() - 1, 1), common = {
+    IdOrg: params.IdOrg,
+    __heading_chapter: params.__heading_chapter || params.IdOrg,
+    __heading_region: params.__heading_region,
+    __heading_country: params.__heading_country,
+    __orientation: "ltr",
+  };
+  const rosterText = await generateReport({ ...common, menuName: "menu.reports.chapter.roster" }, start, end, headers);
+  const roster = parseRosterReport(rosterText);
+  if (roster.length < 10) throw new Error("會員名冊筆數異常，已停止更新以保護現有資料");
+  let dues = [];
+  try {
+    const duesText = await generateReport({ ...common, menuName: "menu.reports.chapter.membership.dues" }, start, end, headers);
+    dues = parseRosterReport(duesText);
+  } catch {}
+  const expiryByName = new Map([...roster, ...dues].filter(item => item.expiryDate).map(item => [normalize(item.member), item.expiryDate]));
+  return {
+    members: roster.map(item => item.member),
+    renewals: roster.map(item => ({ member: item.member, expiryDate: expiryByName.get(normalize(item.member)) || item.expiryDate })).filter(item => item.expiryDate),
+  };
+}
 async function upload(key, payload) {
   const response = await fetch(`${SITE}/api/v1/bni-sync`, {
       method: "POST",
@@ -536,41 +650,46 @@ async function upload(key, payload) {
   if (!response.ok) throw new Error(result.error || "同步失敗");
   return result;
 }
-$("sync").onclick = async () => {
+async function runAttendance() {
   try {
     $("sync").disabled = true;
     status("正在讀取 BNI Connect…");
     const key = $("key").value.trim();
     if (!key) throw new Error("請先貼上並儲存同步配對金鑰");
-    const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
+    const tab = await bniTab();
     await sessionFor(tab);
     status("正在自動開啟並產生滾動六個月 PALMS…");
     const report = await readAttendancePalms(tab.id),
       records = parseAttendanceReport(report.text, new Date(report.end));
     if (!records.length) throw new Error("報表沒有可同步的 PALMS 紀錄");
     const result = await upload(key, { records });
-    status(`同步完成：${result.count} 筆出席已更新。`, "ok");
+    const message = `出缺席完成：${result.count} 筆已更新。`;
+    status(message, "ok");
+    return message;
   } catch (error) {
     status(error.message || "同步失敗", "error");
+    throw error;
   } finally {
     $("sync").disabled = false;
   }
-};
-$("sync-kpi").onclick = async () => {
+}
+$("sync").onclick = runAttendance;
+async function runKpi() {
   try {
     $("sync-kpi").disabled = true;
     status("正在逐一彙整全分會個人 PALMS，約需 1–3 分鐘…");
     const key = $("key").value.trim();
     if (!key) throw new Error("請先貼上並儲存同步配對金鑰");
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
+    const tab = await bniTab();
     await sessionFor(tab);
-    const batch = await readPersonalPalms(tab.id);
+    let batch;
+    try {
+      const records = await readSummaryKpis(tab);
+      batch = { records, errors: [], failedMembers: [], total: records.length };
+    } catch {
+      status("分會總表暫時無法讀取，改用逐位補抓…");
+      batch = await readPersonalPalms(tab.id);
+    }
     if (!batch.records?.length)
       throw new Error(batch.errors?.[0] || "沒有可同步的個人 PALMS 資料");
     status(
@@ -581,13 +700,54 @@ $("sync-kpi").onclick = async () => {
         failedMembers: batch.failedMembers || [],
       }),
       failed = batch.errors?.length || 0;
+    const message = `KPI 完成：${result.kpiCount} 位會員已更新${failed ? `，${failed} 位維持待補（${(batch.failedMembers || []).join("、")}）` : ""}。`;
     status(
-      `同步完成：${result.kpiCount} 位會員已更新${failed ? `，${failed} 位維持待補（${(batch.failedMembers || []).join("、")}）` : ""}。`,
+      message,
       failed ? "error" : "ok",
     );
+    return message;
   } catch (error) {
     status(error.message || "同步失敗", "error");
+    throw error;
   } finally {
     $("sync-kpi").disabled = false;
   }
-};
+}
+$("sync-kpi").onclick = runKpi;
+
+async function runAll() {
+  const button = $("sync-all");
+  button.disabled = true;
+  try {
+    const key = $("key").value.trim();
+    if (!key) throw new Error("請先貼上並儲存同步配對金鑰");
+    const tab = await bniTab();
+    status("正在確認在籍會員與續約日期…");
+    const roster = await readRosterAndRenewals(tab);
+    const rosterResult = await upload(key, roster);
+    const attendance = await runAttendance();
+    const kpi = await runKpi();
+    const stamp = new Date().toLocaleString("zh-TW", { hour12: false });
+    const message = `${stamp}｜主檔 ${rosterResult.memberCount || roster.members.length} 位、續約 ${rosterResult.renewalCount || roster.renewals.length} 位。${attendance} ${kpi}`;
+    $("last-result").textContent = message;
+    chrome.storage.local.set({ lastSyncResult: message, lastSyncAt: Date.now() });
+    status("全部資料更新完成。", "ok");
+    return true;
+  } catch (error) {
+    const message = `${new Date().toLocaleString("zh-TW", { hour12: false })}｜${error.message || "更新失敗"}`;
+    $("last-result").textContent = message;
+    chrome.storage.local.set({ lastSyncResult: message });
+    status(error.message || "更新失敗", "error");
+    return false;
+  } finally {
+    button.disabled = false;
+  }
+}
+$("sync-all").onclick = runAll;
+if (new URLSearchParams(location.search).get("auto") === "1") {
+  setTimeout(async () => {
+    const ok = await runAll();
+    chrome.runtime.sendMessage({ type: "scheduled-result", ok });
+    if (ok) setTimeout(() => window.close(), 2500);
+  }, 800);
+}
