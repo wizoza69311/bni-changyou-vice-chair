@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BNI 長佑 PALMS 同步",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "從已登入的 BNI Connect 安全同步出席與個人 PALMS KPI 到副主席管理系統。",
   "icons": { "128": "icon128.svg" },
   "permissions": ["activeTab", "scripting", "storage", "alarms", "tabs", "notifications"],

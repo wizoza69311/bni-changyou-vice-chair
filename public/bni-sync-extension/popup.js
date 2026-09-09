@@ -1,4 +1,5 @@
 const SITE = "https://bni-changyou-vice-chair.wizoza69311.chatgpt.site";
+const BNI_REPORTS = "https://www.bniconnectglobal.com/web/secure/reportsHome#reportsactiontabcontentstructurechapter";
 const $ = (id) => document.getElementById(id),
   status = (text, type = "") => {
     $("status").textContent = text;
@@ -546,9 +547,26 @@ function parseRosterReport(text) {
 }
 async function bniTab() {
   const tabs = await chrome.tabs.query({});
-  const tab = tabs.find((item) => item.url?.includes("bniconnectglobal.com/web/secure"));
-  if (!tab) throw new Error("找不到已登入的 BNI Connect 頁面，請先登入並保持頁面開啟");
-  return tab;
+  let tab = tabs.find((item) => item.url?.includes("bniconnectglobal.com/web/secure")) ||
+    tabs.find((item) => item.url?.includes("bniconnectglobal.com/login"));
+  if (!tab) tab = await chrome.tabs.create({ url: BNI_REPORTS, active: false });
+  else if (!tab.url?.includes("/web/secure/reportsHome"))
+    tab = await chrome.tabs.update(tab.id, { url: BNI_REPORTS, active: false });
+  if (tab.status !== "complete") {
+    await new Promise((resolve) => {
+      const timeout = setTimeout(() => { chrome.tabs.onUpdated.removeListener(listener); resolve(); }, 30000);
+      const listener = (tabId, info) => {
+        if (tabId === tab.id && info.status === "complete") {
+          clearTimeout(timeout); chrome.tabs.onUpdated.removeListener(listener); resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+  }
+  const current = await chrome.tabs.get(tab.id);
+  if (!current.url?.includes("/web/secure/reportsHome"))
+    throw new Error("BNI 登入已過期，請在剛開啟的頁面登入後再按一次更新");
+  return current;
 }
 async function reportContext(tab, headers) {
   const [profileResponse, homeResponse, page] = await Promise.all([

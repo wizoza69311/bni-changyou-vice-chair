@@ -37,8 +37,10 @@ chrome.runtime.onMessage.addListener((message) => {
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!alarm.name.startsWith("weekly-")) return;
-  let [tab] = await chrome.tabs.query({ url: "https://www.bniconnectglobal.com/web/secure/*" });
+  let [tab] = await chrome.tabs.query({ url: "https://www.bniconnectglobal.com/*" });
   if (!tab) tab = await chrome.tabs.create({ url: REPORTS_URL, active: false });
+  else if (!tab.url?.includes("/web/secure/reportsHome"))
+    tab = await chrome.tabs.update(tab.id, { url: REPORTS_URL, active: false });
   if (tab.status !== "complete") {
     await new Promise((resolve) => {
       const listener = (tabId, info) => {
