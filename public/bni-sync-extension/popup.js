@@ -679,7 +679,13 @@ async function upload(key, payload) {
   if (!response.ok) throw new Error(result.error || "同步失敗");
   return result;
 }
-async function runAttendance() {
+function attendanceCoverage(records, expectedMembers) {
+  const dates = records.map((item) => item.date).sort(), latestDate = dates.at(-1) || "";
+  const present = new Set(records.filter((item) => item.date === latestDate).map((item) => normalize(item.member)));
+  const missingMembers = expectedMembers.filter((member) => !present.has(normalize(member)));
+  return { latestDate, presentCount: present.size, expectedCount: expectedMembers.length, missingMembers };
+}
+async function runAttendance(expectedMembers = []) {
   try {
     $("sync").disabled = true;
     status("正在讀取 BNI Connect…");
@@ -688,12 +694,27 @@ async function runAttendance() {
     const tab = await bniTab();
     await sessionFor(tab);
     status("正在自動開啟並產生滾動六個月 PALMS…");
-    const report = await readAttendancePalms(tab.id),
-      records = parseAttendanceReport(report.text, new Date(report.end));
+    let report = await readAttendancePalms(tab.id),
+      records = parseAttendanceReport(report.text, new Date(report.end)),
+      coverage = expectedMembers.length ? attendanceCoverage(records, expectedMembers) : null;
+    if (coverage?.missingMembers.length) {
+      status(`最新例會缺少 ${coverage.missingMembers.length} 位，正在自動複查…`);
+      const retryReport = await readAttendancePalms(tab.id),
+        retryRecords = parseAttendanceReport(retryReport.text, new Date(retryReport.end)),
+        retryCoverage = attendanceCoverage(retryRecords, expectedMembers);
+      if (retryCoverage.presentCount >= coverage.presentCount) {
+        report = retryReport;
+        records = retryRecords;
+        coverage = retryCoverage;
+      }
+    }
     if (!records.length) throw new Error("報表沒有可同步的 PALMS 紀錄");
-    const result = await upload(key, { records });
-    const message = `出缺席完成：${result.count} 筆已更新。`;
-    status(message, "ok");
+    const result = await upload(key, { records, attendanceCheck: coverage });
+    const incomplete = Boolean(coverage?.missingMembers.length),
+      message = incomplete
+        ? `出缺席已更新 ${result.count} 筆，但 ${coverage.missingMembers.length} 位待核對：${coverage.missingMembers.join("、")}`
+        : `出缺席完成：${result.count} 筆已更新${coverage ? `，最新例會 ${coverage.presentCount}/${coverage.expectedCount} 位已核對` : ""}。`;
+    status(message, incomplete ? "error" : "ok");
     return message;
   } catch (error) {
     status(error.message || "同步失敗", "error");
@@ -754,14 +775,14 @@ async function runAll() {
     status("正在確認在籍會員與續約日期…");
     const roster = await readRosterAndRenewals(tab);
     const rosterResult = await upload(key, roster);
-    const attendance = await runAttendance();
+    const attendance = await runAttendance(roster.members);
     const kpi = await runKpi();
     const stamp = new Date().toLocaleString("zh-TW", { hour12: false });
     const message = `${stamp}｜主檔 ${rosterResult.memberCount || roster.members.length} 位、續約 ${rosterResult.renewalCount || roster.renewals.length} 位。${attendance} ${kpi}`;
     $("last-result").textContent = message;
     chrome.storage.local.set({ lastSyncResult: message, lastSyncAt: Date.now() });
-    status("全部資料更新完成。", "ok");
-    return true;
+    status(attendance.includes("待核對") ? "資料已更新，但出席仍有缺漏待核對。" : "全部資料更新完成。", attendance.includes("待核對") ? "error" : "ok");
+    return !attendance.includes("待核對");
   } catch (error) {
     const message = `${new Date().toLocaleString("zh-TW", { hour12: false })}｜${error.message || "更新失敗"}`;
     $("last-result").textContent = message;
