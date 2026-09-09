@@ -84,6 +84,15 @@ async function readPageContext(tabId) {
         if (element.value && !params[element.name])
           params[element.name] = element.value;
       }
+      const chapter = document.getElementById("bniChapter")?.getAttribute("name") || "",
+        region = document.getElementById("bniRegion")?.getAttribute("name") || "",
+        country = document.getElementById("bniCountry")?.getAttribute("name") || "";
+      if (/^\d+$/.test(chapter)) {
+        params.IdOrg = params.IdOrg || chapter;
+        params.__heading_chapter = params.__heading_chapter || chapter;
+      }
+      if (/^\d+$/.test(region)) params.__heading_region = params.__heading_region || region;
+      if (/^\d+$/.test(country)) params.__heading_country = params.__heading_country || country;
       return {
         params,
         url: location.href,
