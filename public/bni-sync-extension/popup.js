@@ -114,7 +114,9 @@ async function readAttendancePalms(tabId) {
         displayDate = (date) =>
           `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
       document.querySelector(".ui-dialog-titlebar-close")?.click();
-      const tabLink = document.querySelector('a[href="#ui-tabs-16"]');
+      const tabLink = [...document.querySelectorAll('a[href^="#ui-tabs-"]')].find(
+        (link) => (link.textContent || "").replace(/\s+/g, "").includes("PALMS出席報告"),
+      );
       if (!tabLink) return { error: "找不到 PALMS 出席報告，請確認目前位於 BNI 報告頁" };
       tabLink.click();
       let form = null;
