@@ -6,6 +6,8 @@
 
 正式網站：<https://bni-changyou-vice-chair.wizoza69311.chatgpt.site/>
 
+日常工作分流與兩台電腦同步方式請見 [`docs/WORKFLOW.md`](docs/WORKFLOW.md)。
+
 ## 技術架構
 
 - Node.js 22+
