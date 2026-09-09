@@ -542,10 +542,26 @@ function parseRosterReport(text) {
     }
   }
   if (headerIndex < 0) throw new Error("無法辨識會員名冊欄位");
+  const nonMemberLabels = new Set([
+    "會員姓名",
+    "分會網站管理員",
+    "發展協調人",
+    "會員委員會",
+    "會員委員會社區建設者",
+    "會員委員會品質保證",
+    "會員委員會會員參與",
+    "會員委員會會員關係",
+  ]);
   return rows.slice(headerIndex + 1).map((row) => {
     const member = String(indexes.member >= 0 ? row[indexes.member] || "" : `${row[indexes.surname] || ""}${row[indexes.givenName] || ""}`).replace(/\s+/g, " ").trim();
     return { member, expiryDate: indexes.expiry >= 0 ? parseDateValue(row[indexes.expiry]) : "" };
-  }).filter((item) => item.member && !/合計|總計|total/i.test(item.member));
+  }).filter((item) => {
+    const normalized = normalize(item.member);
+    return item.member &&
+      !/合計|總計|total/i.test(item.member) &&
+      !/^\d+會員$/.test(normalized) &&
+      !nonMemberLabels.has(normalized);
+  });
 }
 async function bniTab() {
   const tabs = await chrome.tabs.query({});
