@@ -491,7 +491,7 @@ export default function Home() {
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
   const todayKey=taipeiDateKey();
-  const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end);start.setMonth(start.getMonth()-6);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
+  const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end.getFullYear(),end.getMonth()-5,1);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
   const memberProfiles=useMemo(()=>[...activeMemberNames].filter(name=>!departedMembers.has(name)).sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(name=>{
     const records=attendanceRecords.filter(record=>normalizeMemberName(record.member)===name&&record.date>=memberWindow.start&&record.date<=memberWindow.end);
     const rawAbsent=records.filter(record=>record.code==="A").length,late=records.filter(record=>record.code==="L").length,substitute=records.filter(record=>record.code==="S").length;
@@ -945,7 +945,7 @@ export default function Home() {
                 {activeMemberProfile&&<div className="member-profile">
                   <section className="panel member-profile-head"><div className="member-avatar">{activeMemberProfile.name.slice(0,1)}</div><div><small>會員個人主檔</small><h2>{activeMemberProfile.name}</h2><p>{activeMemberProfile.assignment?`第 ${activeMemberProfile.assignment.groupId} 組｜委員 ${activeMemberProfile.assignment.committee||"未設定"}｜小組長 ${activeMemberProfile.assignment.leader||"未設定"}`:"尚未完成分組"}</p></div><span className={activeMemberProfile.concerns.length?"needs-care":"clear"}>{activeMemberProfile.concerns.length?"需要關心":"目前正常"}</span></section>
                   <section className="member-profile-stats">
-                    <article><small>統計期間</small><b>{memberWindow.start}<i>至</i>{memberWindow.end}</b><p>依查看日期自動移動</p></article>
+                    <article><small>統計期間</small><b>{memberWindow.start}<i>至</i>{memberWindow.end}</b><p>依月份自動移動</p></article>
                     <article><small>出席積分</small><b>{activeMemberProfile.attendancePoints}<i>／20</i></b><p>{activeMemberProfile.absent} 次折算缺席</p></article>
                     <article><small>續約狀態</small><b>{activeMemberProfile.renewal?.status||"尚無資料"}</b><p>{activeMemberProfile.renewal?`${fmt(activeMemberProfile.renewal.expiryDate)} 到期`:"未進入追蹤期"}</p></article>
                     <article><small>待處理事項</small><b>{activeMemberProfile.concerns.length}</b><p>{activeMemberProfile.cases.length} 個未結案件</p></article>
