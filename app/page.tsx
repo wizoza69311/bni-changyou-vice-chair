@@ -82,7 +82,7 @@ type Visitor = {
 type VisitorStage = "待確認" | "有意願" | "已簽單" | "訪談中" | "待投票" | "待繳費" | "已入會" | "持續追蹤" | "不追蹤";
 type VisitorInterviewStatus = "未聯絡" | "已預約" | "已訪談" | "保留追蹤" | "考慮加入" | "申請中" | "不追蹤" | "已入會";
 type VisitorTrackingFilter = "全部" | "未指派" | "待聯絡" | "已預約" | "考慮加入" | "申請中";
-type AdminDutySchedule = { date:string; policy:string; whiteboard1:string; whiteboard2:string; referralReport:string; committeeRecord:string; host:string; referralCheck:string };
+type AdminDutySchedule = { date:string; policy:string; whiteboard1:string; whiteboard2:string; referralReport:string; committeeRecord:string; host:string };
 type QualityCase = {id:number;member:string;issue:"缺席"|"遲到"|"替代人"|"A信"|"B信"|"關懷";occurredDate:string;status:"待處理"|"聯絡中"|"已結案";owner:string;note:string;updatedAt?:string};
 type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
@@ -331,17 +331,18 @@ const committeeMembers = [
   "李坊祥",
   "田慶堂",
 ];
+const dutyCommitteeMembers=committeeMembers.slice(0,12);
 const dutyFields:{key:Exclude<keyof AdminDutySchedule,"date">;label:string}[]=[
-  {key:"policy",label:"總政策宣讀"},{key:"whiteboard1",label:"白板手 1"},{key:"whiteboard2",label:"白板手 2"},{key:"referralReport",label:"優質引薦／無引薦回報"},{key:"committeeRecord",label:"執事會紀錄"},{key:"host",label:"主持"},{key:"referralCheck",label:"引薦查核"},
+  {key:"policy",label:"總政策宣讀"},{key:"whiteboard1",label:"白板手 1"},{key:"whiteboard2",label:"白板手 2"},{key:"referralReport",label:"優質引薦／無引薦回報"},{key:"committeeRecord",label:"執事會紀錄"},{key:"host",label:"主持委員會會議"},
 ];
 const seedDutySchedules:AdminDutySchedule[]=[
-  {date:"2026-09-17",policy:"楊嘉慧",whiteboard1:"陳建安",whiteboard2:"陳薏如",referralReport:"余博軒",committeeRecord:"林佩佩",host:"",referralCheck:""},
-  {date:"2026-09-24",policy:"林佩佩",whiteboard1:"余博軒",whiteboard2:"田慶堂",referralReport:"連育正",committeeRecord:"黃同慶",host:"蔡瑋倫",referralCheck:"康清智"},
-  {date:"2026-10-01",policy:"游姿菱",whiteboard1:"林彤彤",whiteboard2:"張博凱",referralReport:"王世品",committeeRecord:"黃麟翔",host:"張綺耘",referralCheck:"李坊祥"},
-  {date:"2026-10-08",policy:"田慶堂",whiteboard1:"余博軒",whiteboard2:"連育正",referralReport:"黃同慶",committeeRecord:"林佩佩",host:"曾惠君",referralCheck:"楊嘉慧"},
-  {date:"2026-10-15",policy:"游姿菱",whiteboard1:"康清智",whiteboard2:"林彤彤",referralReport:"張博凱",committeeRecord:"王世品",host:"黃麟翔",referralCheck:"李坊祥"},
-  {date:"2026-10-22",policy:"余博軒",whiteboard1:"連育正",whiteboard2:"黃同慶",referralReport:"林佩佩",committeeRecord:"楊嘉慧",host:"游姿菱",referralCheck:"康清智"},
-  {date:"2026-10-29",policy:"林彤彤",whiteboard1:"張博凱",whiteboard2:"王世品",referralReport:"黃麟翔",committeeRecord:"李坊祥",host:"田慶堂",referralCheck:"余博軒"},
+  {date:"2026-09-17",policy:"余博軒",whiteboard1:"連育正",whiteboard2:"黃同慶",referralReport:"林佩佩",committeeRecord:"楊嘉慧",host:"游姿菱"},
+  {date:"2026-09-24",policy:"康清智",whiteboard1:"林彤彤",whiteboard2:"張博凱",referralReport:"王世品",committeeRecord:"黃麟翔",host:"李坊祥"},
+  {date:"2026-10-01",policy:"連育正",whiteboard1:"黃同慶",whiteboard2:"林佩佩",referralReport:"楊嘉慧",committeeRecord:"游姿菱",host:"康清智"},
+  {date:"2026-10-08",policy:"林彤彤",whiteboard1:"張博凱",whiteboard2:"王世品",referralReport:"黃麟翔",committeeRecord:"李坊祥",host:"余博軒"},
+  {date:"2026-10-15",policy:"黃同慶",whiteboard1:"林佩佩",whiteboard2:"楊嘉慧",referralReport:"游姿菱",committeeRecord:"康清智",host:"林彤彤"},
+  {date:"2026-10-22",policy:"張博凱",whiteboard1:"王世品",whiteboard2:"黃麟翔",referralReport:"李坊祥",committeeRecord:"余博軒",host:"連育正"},
+  {date:"2026-10-29",policy:"林佩佩",whiteboard1:"楊嘉慧",whiteboard2:"游姿菱",referralReport:"康清智",committeeRecord:"林彤彤",host:"張博凱"},
 ];
 // Synced from BNI Connect's current chapter roster report on 2026-08-30.
 const seedActiveMemberNames=new Set(["王世品","賴丰培","蔡伊鎔","林佩佩","楊佳昇","陳依凡","侯冠瑋","盧冠臻","戴劭哲","黃勇嘉","張博凱","余博軒","曹原彰","黃同慶","楊和宥","林品彤","楊嘉慧","許國祥","李坊祥","鍾坤宏","葉奕廷","蘇姮勻","陳姵文","游姿菱","馮威憲","張婉靖","廖婕詠","周子嵐","莊子樂","王孟哲","呂孟翰","林宏一","林宗翰","林定豪","陳宜信","謝宥騏","林家蔚","劉宸緯","熊庭逸","潘建勳","陳建安","黃建華","林思裴","李恩誠","曾惠君","廖愷伶","丁慶儒","田慶堂","王懿德","鍾承翰","洪敏智","林文裕","雷文鳳","吳旌緯","蔡昕宏","陳春長","林昱璋","李曉玫","周曜贊","吳書林","陳朝銘","江柏陞","周榆璇","陳沛慈","康清智","彭澤偉","呂炘豪","翁煜宸","郭玉琴","黃瑀珍","蔡瑋倫","陳睿民","潘祥鈞","廖筱蘭","曾紹恩","張綺耘","劉美葳","洪翊嘉","連育正","陳芷綺","黃莞芹","葉蕥霈","陳薏如","梁虔駖","林詠淇","黃鈺淳","劉雍致","周順智","林駿維","黃麗娟","黃麟翔"]);
@@ -1464,7 +1465,7 @@ export default function Home() {
             <section className="duty-page">
               <div className="renewal-summary"><div><span>06</span><h3>例會行政排班</h3><p>依每週四安排行政輪值，已保留雲端表格既有的未來班表</p></div><strong>{dutySchedules.filter(row=>row.date>=todayKey).length}<small>待執行週次</small></strong></div>
               <section className="duty-notice panel"><div><b>排班原則</b><small>同一週不重複安排同一人；空白代表仍待確認</small></div>{!adminStatus?.isOwner&&<span>目前為檢視模式</span>}</section>
-              <section className="duty-week-list">{dutySchedules.map(row=>{const assigned=Object.entries(row).filter(([key,value])=>key!=="date"&&value).length,duplicateNames=Object.values(row).filter((value,index,all)=>value&&value!==row.date&&all.indexOf(value)!==index);return <article className="panel duty-week" key={row.date}><header><div><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排</small></div>{duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header><div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{[...new Set([...committeeMembers,...activeMemberNames])].sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(member=><option key={member}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div></article>})}</section>
+              <section className="duty-week-list">{dutySchedules.map(row=>{const assignedNames=dutyFields.map(field=>row[field.key]).filter(Boolean),assigned=assignedNames.length,duplicateNames=assignedNames.filter((value,index,all)=>all.indexOf(value)!==index);return <article className="panel duty-week" key={row.date}><header><div><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排</small></div>{duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header><div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{dutyCommitteeMembers.map(member=><option key={member}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div></article>})}</section>
             </section>
           )}
           {view === "quality" && (
