@@ -17,6 +17,7 @@ import "./visitor-layout-fix.css";
 import "./visitor-date-groups.css";
 import "./renewal-horizontal.css";
 import "./visitor-manage.css";
+import "./visitor-pipeline.css";
 import "./visitor-relay.css";
 import "./visitor-group-field.css";
 import "./visitor-delete.css";
@@ -77,7 +78,8 @@ type Visitor = {
   updatedAt?:string;
 };
 type VisitorStage = "待確認" | "有意願" | "已簽單" | "訪談中" | "待投票" | "待繳費" | "已入會" | "持續追蹤" | "不追蹤";
-type VisitorInterviewStatus = "未聯絡" | "已預約" | "已訪談" | "考慮加入" | "申請中" | "不追蹤";
+type VisitorInterviewStatus = "未聯絡" | "已預約" | "已訪談" | "保留追蹤" | "考慮加入" | "申請中" | "不追蹤" | "已入會";
+type VisitorTrackingFilter = "全部" | "未指派" | "待聯絡" | "已預約" | "考慮加入" | "申請中";
 type QualityCase = {id:number;member:string;issue:"缺席"|"遲到"|"替代人"|"A信"|"B信"|"關懷";occurredDate:string;status:"待處理"|"聯絡中"|"已結案";owner:string;note:string;updatedAt?:string};
 type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
@@ -309,7 +311,7 @@ const statusOptions: Status[] = [
   "已離會",
 ];
 const visitorStageOptions: VisitorStage[] = ["待確認","有意願","已簽單","訪談中","待投票","待繳費","已入會","持續追蹤","不追蹤"];
-const visitorInterviewStatusOptions: VisitorInterviewStatus[] = ["未聯絡","已預約","已訪談","考慮加入","申請中","不追蹤"];
+const visitorInterviewStatusOptions: VisitorInterviewStatus[] = ["未聯絡","已預約","已訪談","保留追蹤","考慮加入","申請中","不追蹤","已入會"];
 const committeeMembers = [
   "余博軒",
   "連育正",
@@ -419,6 +421,7 @@ export default function Home() {
   const [visitorRelayDraft,setVisitorRelayDraft]=useState("");
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
+  const [visitorTrackingFilter,setVisitorTrackingFilter]=useState<VisitorTrackingFilter>("全部");
   const [lastSyncedAt,setLastSyncedAt]=useState("");
   const [connectSyncStatus,setConnectSyncStatus]=useState<ConnectSyncStatus|null>(null);
   const [adminStatus,setAdminStatus]=useState<{authenticated:boolean;isOwner:boolean}|null>(null);
@@ -527,8 +530,13 @@ export default function Home() {
   const activeKpiValues=activeKpiScores?Object.values(activeKpiScores):[],activeKpiComplete=activeKpiValues.length===6&&activeKpiValues.every(value=>value!==null),activeKpiTotal=activeKpiComplete?activeKpiValues.reduce<number>((sum,value)=>sum+(value||0),0):null;
   const activeKpiLight=activeKpiTotal===null?null:activeKpiTotal>=70?"green":activeKpiTotal>=50?"yellow":activeKpiTotal>=30?"red":"black";
   const activeVisitors=visitors.filter((visitor)=>visitor.visitDate===visitorRelayDate&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&!visitor.agendaExcludedDates?.includes(visitorRelayDate));
-  const visitorDateGroups=useMemo(()=>Object.entries(visitors.reduce<Record<string,Visitor[]>>((groups,visitor)=>{const key=visitor.visitDate||"日期待補";(groups[key]||=[]).push(visitor);return groups},{})).sort(([a],[b])=>a==="日期待補"?1:b==="日期待補"?-1:b.localeCompare(a)),[visitors]);
-  const visitorAttention=useMemo(()=>{const tracked=visitors.filter(visitor=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會");return{unassigned:tracked.filter(visitor=>!visitor.owner).length,pendingInterview:tracked.filter(visitor=>visitor.owner&&!(["已訪談","考慮加入","申請中","不追蹤"] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||"未聯絡")).length,overdue:tracked.filter(visitor=>Boolean(visitorOverdue(visitor))).length}},[visitors,todayKey]);
+  function visitorLastActivity(visitor:Visitor){return visitor.logs?.at(-1)?.date||visitor.interviewDate||visitor.visitDate||todayKey}
+  function visitorInactiveDays(visitor:Visitor){return Math.max(0,Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitorLastActivity(visitor)}T00:00:00`).getTime())/86400000))}
+  const currentWeekVisitors=useMemo(()=>visitors.filter(visitor=>visitor.visitDate===visitorRelayDate),[visitors,visitorRelayDate]);
+  const retainedVisitors=useMemo(()=>visitors.filter(visitor=>visitor.visitDate!==visitorRelayDate&&((['保留追蹤','考慮加入','申請中'] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||'未聯絡')||(['已簽單','訪談中','待投票','待繳費','持續追蹤'] as VisitorStage[]).includes(visitor.stage||'待確認'))).sort((a,b)=>visitorLastActivity(b).localeCompare(visitorLastActivity(a))),[visitors,visitorRelayDate,todayKey]);
+  const filteredRetainedVisitors=useMemo(()=>retainedVisitors.filter(visitor=>visitorTrackingFilter==="全部"||visitorTrackingFilter==="未指派"&&!visitor.owner||visitorTrackingFilter==="待聯絡"&&(!visitor.interviewStatus||visitor.interviewStatus==="未聯絡")||visitorTrackingFilter==="已預約"&&visitor.interviewStatus==="已預約"||visitorTrackingFilter==="考慮加入"&&visitor.interviewStatus==="考慮加入"||visitorTrackingFilter==="申請中"&&visitor.interviewStatus==="申請中"),[retainedVisitors,visitorTrackingFilter]);
+  const visitorHistoryGroups=useMemo(()=>{const retainedIds=new Set(retainedVisitors.map(visitor=>visitor.id));return Object.entries(visitors.filter(visitor=>visitor.visitDate!==visitorRelayDate&&!retainedIds.has(visitor.id)).reduce<Record<string,Visitor[]>>((groups,visitor)=>{const key=visitor.visitDate||"日期待補";(groups[key]||=[]).push(visitor);return groups},{})).sort(([a],[b])=>a==="日期待補"?1:b==="日期待補"?-1:b.localeCompare(a))},[visitors,visitorRelayDate,retainedVisitors]);
+  const visitorAttention=useMemo(()=>{const tracked=visitors.filter(visitor=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會");return{unassigned:tracked.filter(visitor=>!visitor.owner).length,pendingInterview:tracked.filter(visitor=>visitor.owner&&!(["已訪談","保留追蹤","考慮加入","申請中","不追蹤","已入會"] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||"未聯絡")).length,overdue:tracked.filter(visitor=>Boolean(visitorOverdue(visitor))).length}},[visitors,todayKey]);
   function visitorOverdue(visitor:Visitor){if(!visitor.visitDate)return "";const days=Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitor.visitDate}T00:00:00`).getTime())/86400000);if(visitor.stage==="已簽單"&&days>3)return "訪談逾期";if(visitor.stage==="訪談中"&&days>4)return "投票逾期";if(visitor.stage==="待投票"&&days>7)return "通知逾期";if(visitor.stage==="待繳費"&&days>14)return "付款逾期";return ""}
   const trackedRenewals = renewals.filter((renewal) =>
     trackedMonthKeys.includes(renewal.expiryDate.slice(0, 7)) && !terminalRenewalStatuses.includes(renewal.status),
@@ -664,7 +672,7 @@ export default function Home() {
     setVisitors(next);
     patchRecord("visitor",id,changes);
   }
-  function updateVisitorInterview(visitor:Visitor,status:VisitorInterviewStatus){const changes:Partial<Visitor>={interviewStatus:status};if(status==="已訪談"&&!visitor.interviewDate)changes.interviewDate=todayKey;if(status==="不追蹤")changes.stage="不追蹤";if(status==="申請中"&&(!visitor.stage||visitor.stage==="待確認"||visitor.stage==="有意願"||visitor.stage==="持續追蹤"))changes.stage="已簽單";updateVisitor(visitor.id,changes)}
+  function updateVisitorInterview(visitor:Visitor,status:VisitorInterviewStatus){const changes:Partial<Visitor>={interviewStatus:status};if(status==="已訪談"&&!visitor.interviewDate)changes.interviewDate=todayKey;if(status==="保留追蹤"||status==="考慮加入")changes.stage="持續追蹤";if(status==="不追蹤")changes.stage="不追蹤";if(status==="已入會")changes.stage="已入會";if(status==="申請中"&&(!visitor.stage||visitor.stage==="待確認"||visitor.stage==="有意願"||visitor.stage==="持續追蹤"))changes.stage="已簽單";updateVisitor(visitor.id,changes)}
   function removeVisitorFromAgenda(visitor:Visitor){if(!window.confirm(`確定要將來賓「${visitor.name}」從 ${fmt(visitorRelayDate)} 議程移除嗎？\n來賓追蹤資料與聯絡紀錄會完整保留。`))return;const agendaExcludedDates=[...new Set([...(visitor.agendaExcludedDates||[]),visitorRelayDate])];updateVisitor(visitor.id,{agendaExcludedDates});flash(`${visitor.name} 已從本週議程移除，追蹤資料仍保留`)}
   function addVisitorLog(visitor:Visitor){const text=visitorLogDraft[visitor.id]?.trim();if(!text)return;const nextLogs=[...(visitor.logs||[]),{date:todayKey,owner:visitor.owner||"未指派",text}];updateVisitor(visitor.id,{logs:nextLogs,note:text});setVisitorLogDraft({...visitorLogDraft,[visitor.id]:""});flash("追蹤紀錄已新增")}
   function addVisitor(){if(!visitorDraft.name.trim()||!visitorDraft.email.trim()){flash("請填寫來賓姓名與 Email");return}const visitor={id:Date.now(),name:visitorDraft.name.trim(),email:visitorDraft.email.trim(),inviter:visitorDraft.inviter.trim()||"現場新增",profession:visitorDraft.profession.trim()||"待補充",attendance:"預計出席",interest:"待確認",owner:"",note:"",stage:"待確認",visitDate:todayKey,receptionOwner:"",followUpDate:"",logs:[]} as Visitor;setVisitors(current=>[...current,visitor]);setVisitorDraft({name:"",email:"",inviter:"",profession:""});patchRecord("visitor",visitor.id,visitor as unknown as Record<string,unknown>,"create");flash("臨時來賓已加入本週議程")}
@@ -1363,10 +1371,12 @@ export default function Home() {
           )}
           {view === "visitors" && (
             <section className="visitor-overview">
-              <div className="renewal-summary"><div><span>04</span><h3>本週來賓追蹤</h3><p>每週接龍名單可匯入此處，會議中直接更新追蹤狀況與備註</p></div><strong>{visitors.length}<small>本週來賓</small></strong></div>
+              <div className="renewal-summary"><div><span>04</span><h3>來賓追蹤</h3><p>本週名單、跨週追蹤與歷史紀錄分開整理</p></div><strong>{retainedVisitors.length}<small>持續追蹤</small></strong></div>
               <section className="visitor-attention-summary" aria-label="來賓待處理摘要"><article><small>尚未指派</small><b>{visitorAttention.unassigned}</b><span>由副主席手動選擇締結委員</span></article><article><small>等待訪談回報</small><b>{visitorAttention.pendingInterview}</b><span>已指派但尚未完成訪談</span></article><article className={visitorAttention.overdue?"warning":""}><small>流程逾期</small><b>{visitorAttention.overdue}</b><span>需要在本週會議確認</span></article></section>
               {visitorAddForm()}
-              {visitorDateGroups.map(([date,dateVisitors])=><section className="visitor-date-group" key={date}><header><div><b>{date==="日期待補"?date:fmt(date)}</b><small>來賓日期</small></div><span>{dateVisitors.length} 位來賓</span></header><section className="visitor-manage-list">{dateVisitors.map(visitorTrackingCard)}</section></section>)}
+              <section className="visitor-date-group visitor-current-week"><header><div><b>本週新來賓</b><small>{fmt(visitorRelayDate)} 例會名單</small></div><span>{currentWeekVisitors.length} 位來賓</span></header>{currentWeekVisitors.length?<section className="visitor-manage-list">{currentWeekVisitors.map(visitorTrackingCard)}</section>:<p className="visitor-pipeline-empty">本週尚未匯入來賓，可從本週議程貼上接龍名單。</p>}</section>
+              <section className="visitor-tracking-board"><header><div><b>跨週持續追蹤</b><small>只保留需要繼續聯絡、考慮加入或申請中的來賓</small></div><span>{retainedVisitors.length} 位</span></header><nav className="visitor-filter-bar" aria-label="持續追蹤篩選">{(["全部","未指派","待聯絡","已預約","考慮加入","申請中"] as VisitorTrackingFilter[]).map(filter=><button type="button" key={filter} className={visitorTrackingFilter===filter?"active":""} onClick={()=>setVisitorTrackingFilter(filter)}>{filter}</button>)}</nav>{filteredRetainedVisitors.length?<section className="visitor-manage-list">{filteredRetainedVisitors.map(visitor=><div className="visitor-retained-item" key={visitor.id}><div className="visitor-last-touch">最後更新 {fmt(visitorLastActivity(visitor))}<span>{visitorInactiveDays(visitor)} 天前</span></div>{visitorTrackingCard(visitor)}</div>)}</section>:<p className="visitor-pipeline-empty">這個分類目前沒有需要追蹤的來賓。</p>}</section>
+              <details className="visitor-history-panel"><summary><span><b>歷史紀錄</b><small>已結束或未保留的來賓仍可依日期查詢</small></span><em>{visitorHistoryGroups.reduce((sum,[,items])=>sum+items.length,0)} 位</em></summary>{visitorHistoryGroups.length?visitorHistoryGroups.map(([date,dateVisitors])=><section className="visitor-date-group" key={date}><header><div><b>{date==="日期待補"?date:fmt(date)}</b><small>來賓日期</small></div><span>{dateVisitors.length} 位來賓</span></header><section className="visitor-manage-list">{dateVisitors.map(visitorTrackingCard)}</section></section>):<p className="visitor-pipeline-empty">目前沒有歷史紀錄。</p>}</details>
             </section>
           )}
           {view === "tasks" && (
