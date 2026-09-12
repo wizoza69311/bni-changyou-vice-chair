@@ -207,6 +207,24 @@ const worker = {
       if(!email||!admin||email!==admin)return new Response("此頁面僅限系統擁有者",{status:403,headers:{"content-type":"text/plain; charset=utf-8"}});
     }
 
+    if(url.pathname==="/api/admin-schedules"){
+      if(!env.DB)return apiJson({schedules:[]},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS admin_schedule_state (id INTEGER PRIMARY KEY CHECK (id=1), schedules TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      if(request.method==="GET"){
+        const row=await env.DB.prepare(`SELECT schedules,updated_at AS updatedAt FROM admin_schedule_state WHERE id=1`).first<{schedules:string;updatedAt:string}>();
+        return apiJson({schedules:JSON.parse(row?.schedules||"[]"),updatedAt:row?.updatedAt||null});
+      }
+      if(request.method==="POST"){
+        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+        if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以修改行政排班"},403);
+        const body=await request.json() as {schedules?:unknown},schedules=Array.isArray(body.schedules)?body.schedules:[];
+        const updatedAt=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO admin_schedule_state (id,schedules,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET schedules=excluded.schedules,updated_at=excluded.updated_at`).bind(JSON.stringify(schedules),updatedAt).run();
+        return apiJson({ok:true,schedules,updatedAt});
+      }
+      return apiJson({error:"不支援的行政排班操作"},405);
+    }
+
     if (url.pathname === "/api/practice") {
       if (!env.DB) return apiJson({ error: "實習資料庫尚未啟用" }, 503);
       await env.DB.batch([

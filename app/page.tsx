@@ -19,6 +19,7 @@ import "./renewal-horizontal.css";
 import "./visitor-manage.css";
 import "./visitor-pipeline.css";
 import "./sync-check.css";
+import "./duty-schedule.css";
 import "./visitor-relay.css";
 import "./visitor-group-field.css";
 import "./visitor-delete.css";
@@ -81,6 +82,7 @@ type Visitor = {
 type VisitorStage = "待確認" | "有意願" | "已簽單" | "訪談中" | "待投票" | "待繳費" | "已入會" | "持續追蹤" | "不追蹤";
 type VisitorInterviewStatus = "未聯絡" | "已預約" | "已訪談" | "保留追蹤" | "考慮加入" | "申請中" | "不追蹤" | "已入會";
 type VisitorTrackingFilter = "全部" | "未指派" | "待聯絡" | "已預約" | "考慮加入" | "申請中";
+type AdminDutySchedule = { date:string; policy:string; whiteboard1:string; whiteboard2:string; referralReport:string; committeeRecord:string; host:string; referralCheck:string };
 type QualityCase = {id:number;member:string;issue:"缺席"|"遲到"|"替代人"|"A信"|"B信"|"關懷";occurredDate:string;status:"待處理"|"聯絡中"|"已結案";owner:string;note:string;updatedAt?:string};
 type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
@@ -155,6 +157,7 @@ type View =
   | "visitors"
   | "tasks"
   | "groups"
+  | "schedules"
   | "quality"
   | "history";
 
@@ -328,6 +331,18 @@ const committeeMembers = [
   "李坊祥",
   "田慶堂",
 ];
+const dutyFields:{key:Exclude<keyof AdminDutySchedule,"date">;label:string}[]=[
+  {key:"policy",label:"總政策宣讀"},{key:"whiteboard1",label:"白板手 1"},{key:"whiteboard2",label:"白板手 2"},{key:"referralReport",label:"優質引薦／無引薦回報"},{key:"committeeRecord",label:"執事會紀錄"},{key:"host",label:"主持"},{key:"referralCheck",label:"引薦查核"},
+];
+const seedDutySchedules:AdminDutySchedule[]=[
+  {date:"2026-09-17",policy:"楊嘉慧",whiteboard1:"陳建安",whiteboard2:"陳薏如",referralReport:"余博軒",committeeRecord:"林佩佩",host:"",referralCheck:""},
+  {date:"2026-09-24",policy:"林佩佩",whiteboard1:"余博軒",whiteboard2:"田慶堂",referralReport:"連育正",committeeRecord:"黃同慶",host:"蔡瑋倫",referralCheck:"康清智"},
+  {date:"2026-10-01",policy:"游姿菱",whiteboard1:"林彤彤",whiteboard2:"張博凱",referralReport:"王世品",committeeRecord:"黃麟翔",host:"張綺耘",referralCheck:"李坊祥"},
+  {date:"2026-10-08",policy:"田慶堂",whiteboard1:"余博軒",whiteboard2:"連育正",referralReport:"黃同慶",committeeRecord:"林佩佩",host:"曾惠君",referralCheck:"楊嘉慧"},
+  {date:"2026-10-15",policy:"游姿菱",whiteboard1:"康清智",whiteboard2:"林彤彤",referralReport:"張博凱",committeeRecord:"王世品",host:"黃麟翔",referralCheck:"李坊祥"},
+  {date:"2026-10-22",policy:"余博軒",whiteboard1:"連育正",whiteboard2:"黃同慶",referralReport:"林佩佩",committeeRecord:"楊嘉慧",host:"游姿菱",referralCheck:"康清智"},
+  {date:"2026-10-29",policy:"林彤彤",whiteboard1:"張博凱",whiteboard2:"王世品",referralReport:"黃麟翔",committeeRecord:"李坊祥",host:"田慶堂",referralCheck:"余博軒"},
+];
 // Synced from BNI Connect's current chapter roster report on 2026-08-30.
 const seedActiveMemberNames=new Set(["王世品","賴丰培","蔡伊鎔","林佩佩","楊佳昇","陳依凡","侯冠瑋","盧冠臻","戴劭哲","黃勇嘉","張博凱","余博軒","曹原彰","黃同慶","楊和宥","林品彤","楊嘉慧","許國祥","李坊祥","鍾坤宏","葉奕廷","蘇姮勻","陳姵文","游姿菱","馮威憲","張婉靖","廖婕詠","周子嵐","莊子樂","王孟哲","呂孟翰","林宏一","林宗翰","林定豪","陳宜信","謝宥騏","林家蔚","劉宸緯","熊庭逸","潘建勳","陳建安","黃建華","林思裴","李恩誠","曾惠君","廖愷伶","丁慶儒","田慶堂","王懿德","鍾承翰","洪敏智","林文裕","雷文鳳","吳旌緯","蔡昕宏","陳春長","林昱璋","李曉玫","周曜贊","吳書林","陳朝銘","江柏陞","周榆璇","陳沛慈","康清智","彭澤偉","呂炘豪","翁煜宸","郭玉琴","黃瑀珍","蔡瑋倫","陳睿民","潘祥鈞","廖筱蘭","曾紹恩","張綺耘","劉美葳","洪翊嘉","連育正","陳芷綺","黃莞芹","葉蕥霈","陳薏如","梁虔駖","林詠淇","黃鈺淳","劉雍致","周順智","林駿維","黃麗娟","黃麟翔"]);
 const normalizeMemberName=(name:string)=>name.replace(/\s+/g,"");
@@ -340,6 +355,7 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: "visitors", label: "來賓追蹤", icon: "◎" },
   { id: "tasks", label: "委員待辦", icon: "✓" },
   { id: "groups", label: "分組管理", icon: "⊞" },
+  { id: "schedules", label: "行政排班", icon: "▤" },
   { id: "quality", label: "出缺席管理", icon: "◇" },
   { id: "history", label: "會議紀錄儲存", icon: "▣" },
 ];
@@ -395,6 +411,7 @@ export default function Home() {
     [visitors, setVisitors] = useState(seedVisitors),
     [qualityCases,setQualityCases]=useState<QualityCase[]>([]),
     [memberGroups,setMemberGroups]=useState<MemberGroup[]>(seedMemberGroups),
+    [dutySchedules,setDutySchedules]=useState<AdminDutySchedule[]>(seedDutySchedules),
     [careAssignments,setCareAssignments]=useState<CareAssignment[]>([]),
     [memberKpis,setMemberKpis]=useState<MemberKpi[]>([]),
     [activeMemberNames,setActiveMemberNames]=useState<Set<string>>(seedActiveMemberNames),
@@ -484,6 +501,7 @@ export default function Home() {
     fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set(data.members.map((name:string)=>normalizeMemberName(name))))}).catch(()=>{});
   }, []);
   useEffect(()=>{const refresh=()=>fetch("/api/bni-sync/status").then(r=>r.ok?r.json():null).then(data=>setConnectSyncStatus(data?.status||null)).catch(()=>{});refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer)},[]);
+  useEffect(()=>{fetch("/api/admin-schedules").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.schedules)&&data.schedules.length)setDutySchedules(data.schedules)}).catch(()=>{})},[]);
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors);serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="members"))setView("dashboard")},[adminStatus,view]);
@@ -794,6 +812,7 @@ export default function Home() {
   function createQualityCaseFromAlert(alert:(typeof qualityAlerts)[number]){const issue=alertIssue(alert),assignment=careAssignment(alert.member),owner=suggestedAlertOwner(alert);if(hasOpenAlertCase(alert)){flash(`${alert.member} 已有未結案的${issue}案件`);return}saveQualityCase({id:Date.now(),member:alert.member,issue,occurredDate:todayKey,status:"待處理",owner,note:`${alert.reason}｜建議處理：${alert.level}${assignment?`｜第 ${assignment.groupId} 組${owner?`｜已指派：${owner}`:"｜待補分組負責人"}`:"｜待補分組負責人"}`})}
   function previewAttendanceImport(){try{const parsed=JSON.parse(attendanceImportDraft);if(!Array.isArray(parsed))throw new Error("PALMS 資料格式必須是陣列");const valid=(parsed as AttendanceRecord[]).filter(record=>record&&typeof record.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(record.date))&&["P","A","L","M","S"].includes(String(record.code)));const excluded=valid.filter(record=>!activeMemberNames.has(normalizeMemberName(record.member))).length;const records=[...new Map(valid.filter(record=>activeMemberNames.has(normalizeMemberName(record.member))).map(record=>[`${normalizeMemberName(record.member)}|${record.date}`,record])).values()];const currentMap=new Map(attendanceRecords.map(record=>[`${normalizeMemberName(record.member)}|${record.date}`,record.code])),incomingMap=new Map(records.map(record=>[`${normalizeMemberName(record.member)}|${record.date}`,record.code]));let added=0,changed=0,unchanged=0;incomingMap.forEach((code,key)=>{if(!currentMap.has(key))added++;else if(currentMap.get(key)!==code)changed++;else unchanged++});let missing=0;currentMap.forEach((_,key)=>{if(!incomingMap.has(key))missing++});const coveredMembers=new Set(records.map(record=>normalizeMemberName(record.member))),missingMembers=[...activeMemberNames].filter(member=>!coveredMembers.has(member)).sort((a,b)=>a.localeCompare(b,"zh-Hant"));setAttendancePreview({records,added,changed,unchanged,missing,excluded,missingMembers});flash("PALMS 差異預覽已產生，請確認後再同步")}catch(error){setAttendancePreview(null);flash(error instanceof Error?error.message:"無法預覽 PALMS 資料")}}
   async function importAttendance(){if(!attendancePreview){flash("請先產生差異預覽");return}try{const response=await fetch("/api/attendance-records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({records:attendancePreview.records,baseUpdatedAt:attendanceUpdatedAt})});const data=await response.json();if(response.status===409){setAttendanceRecords(data.records||[]);setAttendanceUpdatedAt(data.updatedAt||"");setAttendancePreview(null);flash("PALMS 已被另一個畫面更新，已載入最新版本，請重新預覽");return}if(!response.ok)throw new Error(data.error||"匯入失敗");setAttendanceRecords(data.records||[]);setAttendanceUpdatedAt(data.updatedAt||"");setAttendanceImportDraft("");setAttendancePreview(null);flash(`已同步 ${data.records?.length||0} 筆 PALMS 紀錄`)}catch(error){flash(error instanceof Error?error.message:"匯入失敗")}}
+  async function updateDuty(date:string,key:Exclude<keyof AdminDutySchedule,"date">,value:string){const next=dutySchedules.map(row=>row.date===date?{...row,[key]:value}:row);setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(!response.ok){flash("行政排班儲存失敗，請稍後重試");return}flash("行政排班已儲存")}
 
   return (
     <div className="app-shell">
@@ -1439,6 +1458,13 @@ export default function Home() {
                   </section>)}
                 </div>
               </div>
+            </section>
+          )}
+          {view === "schedules" && (
+            <section className="duty-page">
+              <div className="renewal-summary"><div><span>06</span><h3>例會行政排班</h3><p>依每週四安排行政輪值，已保留雲端表格既有的未來班表</p></div><strong>{dutySchedules.filter(row=>row.date>=todayKey).length}<small>待執行週次</small></strong></div>
+              <section className="duty-notice panel"><div><b>排班原則</b><small>同一週不重複安排同一人；空白代表仍待確認</small></div>{!adminStatus?.isOwner&&<span>目前為檢視模式</span>}</section>
+              <section className="duty-week-list">{dutySchedules.map(row=>{const assigned=Object.entries(row).filter(([key,value])=>key!=="date"&&value).length,duplicateNames=Object.values(row).filter((value,index,all)=>value&&value!==row.date&&all.indexOf(value)!==index);return <article className="panel duty-week" key={row.date}><header><div><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排</small></div>{duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header><div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{[...new Set([...committeeMembers,...activeMemberNames])].sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(member=><option key={member}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div></article>})}</section>
             </section>
           )}
           {view === "quality" && (
