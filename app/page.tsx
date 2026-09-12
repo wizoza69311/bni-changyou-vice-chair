@@ -524,6 +524,7 @@ export default function Home() {
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
   const todayKey=taipeiDateKey();
+  const visibleDutySchedules=useMemo(()=>dutySchedules.filter(row=>row.date>=todayKey).sort((a,b)=>a.date.localeCompare(b.date)),[dutySchedules,todayKey]);
   const connectSyncAgeDays=connectSyncStatus?.lastSyncAt?Math.floor((Date.now()-new Date(connectSyncStatus.lastSyncAt).getTime())/86400000):null;
   const connectSyncHealth=!connectSyncStatus?"empty":connectSyncStatus.failedMembers>0||attendanceHealth.status==="incomplete"?"error":connectSyncAgeDays!==null&&connectSyncAgeDays>7||attendanceHealth.status==="waiting"?"stale":"ready";
   const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end.getFullYear(),end.getMonth()-5,1);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
@@ -1462,9 +1463,9 @@ export default function Home() {
           )}
           {view === "schedules" && (
             <section className="duty-page">
-              <div className="renewal-summary"><div><span>06</span><h3>例會行政排班</h3><p>依每週四安排行政輪值，已保留雲端表格既有的未來班表</p></div><strong>{dutySchedules.filter(row=>row.date>=todayKey).length}<small>待執行週次</small></strong></div>
+              <div className="renewal-summary"><div><span>06</span><h3>例會行政排班</h3><p>最上方為當週班表，已過日期會自動隱藏</p></div><strong>{visibleDutySchedules.length}<small>待執行週次</small></strong></div>
               <section className="duty-notice panel"><div><b>排班原則</b><small>同一週不重複安排同一人；空白代表仍待確認</small></div>{!adminStatus?.isOwner&&<span>目前為檢視模式</span>}</section>
-              <section className="duty-week-list">{dutySchedules.map(row=>{const assignedNames=dutyFields.map(field=>row[field.key]).filter(Boolean),assigned=assignedNames.length,duplicateNames=assignedNames.filter((value,index,all)=>all.indexOf(value)!==index);return <article className="panel duty-week" key={row.date}><header><div><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排</small></div>{duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header><div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{dutyCommitteeMembers.map(member=><option key={member}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div></article>})}</section>
+              <section className="duty-week-list">{visibleDutySchedules.length?visibleDutySchedules.map((row,index)=>{const assignedNames=dutyFields.map(field=>row[field.key]).filter(Boolean),assigned=assignedNames.length,duplicateNames=assignedNames.filter((value,index,all)=>all.indexOf(value)!==index);return <article className={`panel duty-week${index===0?" current":""}`} key={row.date}><header><div><strong>{index===0?"當週排班":"後續排班"}</strong><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排</small></div>{duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header><div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{dutyCommitteeMembers.map(member=><option key={member}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div></article>}):<section className="panel duty-empty">目前沒有待執行的行政排班</section>}</section>
             </section>
           )}
           {view === "quality" && (
