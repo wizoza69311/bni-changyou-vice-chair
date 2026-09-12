@@ -31,6 +31,7 @@ import "./groups-mobile.css";
 import "./meeting-quality.css";
 import "./quality-matrix-layout-fix.css";
 import "./member-master.css";
+import "./connect-sync.css";
 
 type Status = "待訪談" | "訪談中" | "待表決" | "待繳費" | "已完成" | "預計離會" | "已離會";
 type Renewal = {
@@ -130,6 +131,7 @@ BNI 的政策規定，一名會員只允許三次不到會。
 type AttendanceCode="P"|"A"|"L"|"M"|"S";
 type AttendanceRecord={member:string;date:string;code:AttendanceCode};
 type AttendancePreview={records:AttendanceRecord[];added:number;changed:number;unchanged:number;missing:number;excluded:number;missingMembers:string[]};
+type ConnectSyncStatus={lastSyncAt:string;attendance:{updatedAt:string|null;count:number;latestDate:string};members:{updatedAt:string|null;count:number};renewals:{updatedAt:string|null;count:number};kpis:{updatedAt:string|null;count:number};failedMembers:number};
 type WeeklyArchive = {
   id: number;
   meetingDate: string;
@@ -375,6 +377,7 @@ function taipeiDateKey(now = new Date()) {
     day: "2-digit",
   }).format(now);
 }
+function syncDateTime(value:string|null|undefined){if(!value)return "尚未更新";return new Date(value).toLocaleString("zh-TW",{timeZone:"Asia/Taipei",month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}
 function upcomingThursdayKey(){const base=new Date(`${taipeiDateKey()}T12:00:00+08:00`);const offset=(4-base.getDay()+7)%7;base.setDate(base.getDate()+offset);return taipeiDateKey(base)}
 const trainingScore=(value:number)=>value>=6?15:value>=4?10:value>=2?5:0;
 const visitorScore=(value:number)=>value>=2?15:value>=1?10:0;
@@ -417,6 +420,7 @@ export default function Home() {
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
   const [lastSyncedAt,setLastSyncedAt]=useState("");
+  const [connectSyncStatus,setConnectSyncStatus]=useState<ConnectSyncStatus|null>(null);
   const [adminStatus,setAdminStatus]=useState<{authenticated:boolean;isOwner:boolean}|null>(null);
   const [adminLoginOpen,setAdminLoginOpen]=useState(false);
   const [bniSession,setBniSession]=useState<{connected:boolean;updatedAt:string|null}>({connected:false,updatedAt:null});
@@ -475,6 +479,7 @@ export default function Home() {
     fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
     fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set(data.members.map((name:string)=>normalizeMemberName(name))))}).catch(()=>{});
   }, []);
+  useEffect(()=>{const refresh=()=>fetch("/api/bni-sync/status").then(r=>r.ok?r.json():null).then(data=>setConnectSyncStatus(data?.status||null)).catch(()=>{});refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors);serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="members"))setView("dashboard")},[adminStatus,view]);
@@ -497,6 +502,8 @@ export default function Home() {
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
   const todayKey=taipeiDateKey();
+  const connectSyncAgeDays=connectSyncStatus?.lastSyncAt?Math.floor((Date.now()-new Date(connectSyncStatus.lastSyncAt).getTime())/86400000):null;
+  const connectSyncHealth=!connectSyncStatus?"empty":connectSyncStatus.failedMembers>0?"error":connectSyncAgeDays!==null&&connectSyncAgeDays>7?"stale":"ready";
   const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end.getFullYear(),end.getMonth()-5,1);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
   const memberProfiles=useMemo(()=>[...activeMemberNames].filter(name=>!departedMembers.has(name)).sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(name=>{
     const records=attendanceRecords.filter(record=>normalizeMemberName(record.member)===name&&record.date>=memberWindow.start&&record.date<=memberWindow.end);
@@ -826,6 +833,7 @@ export default function Home() {
             <h1>{nav.find((n) => n.id === view)?.label}</h1>
           </div>
           <div className="header-actions">
+            <button type="button" className={`connect-sync-pill ${connectSyncHealth}`} onClick={()=>setView("dashboard")}><span>Connect</span><b>{connectSyncStatus?syncDateTime(connectSyncStatus.lastSyncAt):"尚未同步"}</b></button>
             <span className="sync">● 多人同步{lastSyncedAt?` · ${new Date(lastSyncedAt).toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit"})}`:""}</span>
             <button
               onClick={() => {
@@ -841,6 +849,7 @@ export default function Home() {
         <div className="content">
           {view === "dashboard" && (
             <>
+              <section className={`connect-sync-card ${connectSyncHealth}`}><header><div><small>BNI CONNECT 同步狀態</small><h2>{connectSyncHealth==="ready"?"資料已更新":connectSyncHealth==="stale"?"超過七天未更新":connectSyncHealth==="error"?"同步有缺漏":"尚無同步紀錄"}</h2></div><time>{connectSyncStatus?`上次成功更新 ${syncDateTime(connectSyncStatus.lastSyncAt)}`:"完成一次同步後會顯示更新結果"}</time></header><div><article><small>出缺席</small><b>{connectSyncStatus?.attendance.latestDate?`更新至 ${fmt(connectSyncStatus.attendance.latestDate)}`:"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.attendance.count} 筆紀錄`:"—"}</span></article><article><small>續約追蹤</small><b>{connectSyncStatus?.renewals.updatedAt?syncDateTime(connectSyncStatus.renewals.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.renewals.count} 位會員`:"—"}</span></article><article><small>會員主檔</small><b>{connectSyncStatus?.members.updatedAt?syncDateTime(connectSyncStatus.members.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.members.count} 位在籍會員`:"—"}</span></article></div></section>
               <section className="stats">
                 <article className="red">
                   <small>14 天內到期</small>

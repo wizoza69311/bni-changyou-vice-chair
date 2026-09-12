@@ -179,7 +179,20 @@ const worker = {
         for(const item of validRenewals){const key=item.member.replace(/\s+/g,""),existing=byName.get(key),daysLeft=Math.ceil((new Date(`${item.expiryDate}T00:00:00+08:00`).getTime()-Date.now())/86400000),fallbackId=Array.from(`${key}|${item.expiryDate}`).reduce((sum,char)=>(sum*31+char.charCodeAt(0))>>>0,7);byName.set(key,{id:Number(existing?.id)||fallbackId,name:item.member,expiryDate:item.expiryDate,daysLeft,status:existing?.status|| (daysLeft<=14?"待繳費":"待訪談"),owner:existing?.owner||"",note:existing?.note||"",updatedAt:now})}
         const next=[...byName.values()];await env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,?,'[]',?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals,updated_at=excluded.updated_at`).bind(JSON.stringify(next),now).run();
       }
+      const latestAttendanceDate=unique.map(item=>item.date).sort().at(-1)||"",syncStatus={lastSyncAt:now,attendance:{updatedAt:unique.length?now:null,count:unique.length,latestDate:latestAttendanceDate},members:{updatedAt:validMembers.length>=10?now:null,count:validMembers.length},renewals:{updatedAt:validRenewals.length?now:null,count:validRenewals.length},kpis:{updatedAt:uniqueKpis.length?now:null,count:uniqueKpis.length},failedMembers:failedMembers.length};
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_status (id INTEGER PRIMARY KEY CHECK (id=1), status TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`INSERT INTO bni_sync_status (id,status,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(JSON.stringify(syncStatus),now).run();
       return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,memberCount:validMembers.length,renewalCount:validRenewals.length,updatedAt:now});
+    }
+
+    if(url.pathname==="/api/bni-sync/status"&&request.method==="GET"){
+      if(!env.DB)return apiJson({status:null});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_status (id INTEGER PRIMARY KEY CHECK (id=1), status TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`).run();
+      const row=await env.DB.prepare(`SELECT status,updated_at AS updatedAt FROM bni_sync_status WHERE id=1`).first<{status:string;updatedAt:string}>();
+      if(row)return apiJson({status:JSON.parse(row.status),updatedAt:row.updatedAt});
+      const attendance=await env.DB.prepare(`SELECT records,updated_at AS updatedAt FROM attendance_state WHERE id=1`).first<{records:string;updatedAt:string}>(),roster=await env.DB.prepare(`SELECT members,updated_at AS updatedAt FROM member_roster_state WHERE id=1`).first<{members:string;updatedAt:string}>(),practice=await env.DB.prepare(`SELECT renewals,updated_at AS updatedAt FROM practice_state WHERE id=1`).first<{renewals:string;updatedAt:string}>();
+      const attendanceRecords=JSON.parse(attendance?.records||"[]") as Array<{date?:string}>,members=JSON.parse(roster?.members||"[]") as unknown[],renewals=JSON.parse(practice?.renewals||"[]") as unknown[],latestDate=attendanceRecords.map(item=>String(item.date||"")).filter(Boolean).sort().at(-1)||"",lastSyncAt=[attendance?.updatedAt,roster?.updatedAt].filter(Boolean).sort().at(-1)||"";
+      return apiJson({status:lastSyncAt?{lastSyncAt,attendance:{updatedAt:attendance?.updatedAt||null,count:attendanceRecords.length,latestDate},members:{updatedAt:roster?.updatedAt||null,count:members.length},renewals:{updatedAt:roster?.updatedAt||null,count:renewals.length},kpis:{updatedAt:null,count:0},failedMembers:0}:null,updatedAt:lastSyncAt||null});
     }
 
     if(url.pathname==="/api/member-roster"&&request.method==="GET"){
