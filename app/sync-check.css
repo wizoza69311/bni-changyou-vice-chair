@@ -1,0 +1,30 @@
+.connect-sync-check {
+  margin: 0;
+  padding: 12px 18px;
+  border-top: 1px solid #eddddd;
+  background: #fffafa;
+}
+
+.connect-sync-check summary {
+  cursor: pointer;
+  color: #982f35;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connect-sync-check p {
+  margin: 9px 0 0;
+  color: #6f5557;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.connect-sync-check-note {
+  margin: 0;
+  padding: 12px 18px;
+  border-top: 1px solid #eadfbd;
+  background: #fffaf0;
+  color: #755719;
+  font-size: 13px;
+  line-height: 1.6;
+}

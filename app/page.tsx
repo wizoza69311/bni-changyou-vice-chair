@@ -18,6 +18,7 @@ import "./visitor-date-groups.css";
 import "./renewal-horizontal.css";
 import "./visitor-manage.css";
 import "./visitor-pipeline.css";
+import "./sync-check.css";
 import "./visitor-relay.css";
 import "./visitor-group-field.css";
 import "./visitor-delete.css";
@@ -506,7 +507,7 @@ export default function Home() {
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
   const todayKey=taipeiDateKey();
   const connectSyncAgeDays=connectSyncStatus?.lastSyncAt?Math.floor((Date.now()-new Date(connectSyncStatus.lastSyncAt).getTime())/86400000):null;
-  const connectSyncHealth=!connectSyncStatus?"empty":connectSyncStatus.failedMembers>0?"error":connectSyncAgeDays!==null&&connectSyncAgeDays>7?"stale":"ready";
+  const connectSyncHealth=!connectSyncStatus?"empty":connectSyncStatus.failedMembers>0||attendanceHealth.status==="incomplete"?"error":connectSyncAgeDays!==null&&connectSyncAgeDays>7||attendanceHealth.status==="waiting"?"stale":"ready";
   const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end.getFullYear(),end.getMonth()-5,1);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
   const memberProfiles=useMemo(()=>[...activeMemberNames].filter(name=>!departedMembers.has(name)).sort((a,b)=>a.localeCompare(b,"zh-Hant")).map(name=>{
     const records=attendanceRecords.filter(record=>normalizeMemberName(record.member)===name&&record.date>=memberWindow.start&&record.date<=memberWindow.end);
@@ -857,7 +858,7 @@ export default function Home() {
         <div className="content">
           {view === "dashboard" && (
             <>
-              <section className={`connect-sync-card ${connectSyncHealth}`}><header><div><small>BNI CONNECT 同步狀態</small><h2>{connectSyncHealth==="ready"?"資料已更新":connectSyncHealth==="stale"?"超過七天未更新":connectSyncHealth==="error"?"同步有缺漏":"尚無同步紀錄"}</h2></div><time>{connectSyncStatus?`上次成功更新 ${syncDateTime(connectSyncStatus.lastSyncAt)}`:"完成一次同步後會顯示更新結果"}</time></header><div><article><small>出缺席</small><b>{connectSyncStatus?.attendance.latestDate?`更新至 ${fmt(connectSyncStatus.attendance.latestDate)}`:"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.attendance.count} 筆紀錄`:"—"}</span></article><article><small>續約追蹤</small><b>{connectSyncStatus?.renewals.updatedAt?syncDateTime(connectSyncStatus.renewals.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.renewals.count} 位會員`:"—"}</span></article><article><small>會員主檔</small><b>{connectSyncStatus?.members.updatedAt?syncDateTime(connectSyncStatus.members.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.members.count} 位在籍會員`:"—"}</span></article></div></section>
+              <section className={`connect-sync-card ${connectSyncHealth}`}><header><div><small>BNI CONNECT 同步狀態</small><h2>{connectSyncHealth==="ready"?"資料已更新且檢查完成":connectSyncHealth==="stale"?attendanceHealth.status==="waiting"?"等待最新例會資料":"超過七天未更新":connectSyncHealth==="error"?"資料已更新，但仍有缺漏待核對":"尚無同步紀錄"}</h2></div><time>{connectSyncStatus?`上次成功更新 ${syncDateTime(connectSyncStatus.lastSyncAt)}`:"完成一次同步後會顯示更新結果"}</time></header><div><article><small>出缺席</small><b>{connectSyncStatus?.attendance.latestDate?`更新至 ${fmt(connectSyncStatus.attendance.latestDate)}`:"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.attendance.count} 筆 · 最新週 ${attendanceHealth.latestCount}/${attendanceHealth.activeCount} 位`:"—"}</span></article><article><small>續約追蹤</small><b>{connectSyncStatus?.renewals.updatedAt?syncDateTime(connectSyncStatus.renewals.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.renewals.count} 位會員`:"—"}</span></article><article><small>會員主檔</small><b>{connectSyncStatus?.members.updatedAt?syncDateTime(connectSyncStatus.members.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.members.count} 位在籍會員`:"—"}</span></article></div>{attendanceHealth.status==="incomplete"&&<details className="connect-sync-check"><summary>查看 {attendanceHealth.missingMembers.length} 位缺漏會員</summary><p>{attendanceHealth.missingMembers.join("、")}</p></details>}{attendanceHealth.status==="waiting"&&<p className="connect-sync-check-note">BNI Connect 尚未提供 {fmt(attendanceHealth.expectedDate)} 的完整資料，系統不會把空白誤算成缺席。</p>}</section>
               <section className="stats">
                 <article className="red">
                   <small>14 天內到期</small>
