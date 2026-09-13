@@ -11,6 +11,8 @@
 .duty-week.current { border: 2px solid #b5792f; box-shadow: 0 10px 28px rgba(126,78,25,.12); }
 .duty-week.current > header { background: #fff5df; }
 .duty-week.current > header strong { background: #a86120; color: #fff; }
+.duty-week.closer-conflict { border-color: #c94a4a; }
+.duty-closers { margin: 0; padding: 10px 16px; border-bottom: 1px solid #eadfbd; background: #fffaf0; color: #755719; font-size: 13px; }
 .duty-week > header b { font-size: 17px; }
 .duty-week > header small { color: #777067; font-size: 13px; }
 .duty-week > header span,.duty-week > header em { padding: 6px 10px; border-radius: 999px; font-size: 12px; font-style: normal; font-weight: 800; }
