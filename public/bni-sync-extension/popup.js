@@ -173,9 +173,7 @@ async function readPersonalPalms(tabId) {
       if (!form || !select)
         return { error: "請先在報告頁展開『個人 PALMS 報告』" };
       const end = new Date(),
-        sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1),
-        fourStart = new Date(end);
-      fourStart.setDate(end.getDate() - 27);
+        sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1);
       const displayDate = (date) =>
           `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`,
         normalize = (value) =>
@@ -306,7 +304,7 @@ async function readPersonalPalms(tabId) {
           oneToOne += asNumber(row[indexes.oneToOne]);
           amount += asNumber(row[indexes.amount]);
           education += asNumber(row[indexes.education]);
-          if (date >= fourStart) visitors += asNumber(row[indexes.visitors]);
+          visitors += asNumber(row[indexes.visitors]);
         }
         const weeks = Math.max(1, (end - sixStart) / 604800000);
         const record = {
@@ -629,9 +627,7 @@ async function readSummaryKpis(tab) {
   if (!params.IdOrg || !params.__heading_region || !params.__heading_country)
     throw new Error("無法取得分會報表識別資料");
   const end = new Date(),
-    sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1),
-    fourStart = new Date(end);
-  fourStart.setDate(end.getDate() - 27);
+    sixStart = new Date(end.getFullYear(), end.getMonth() - 5, 1);
   const base = {
     menuName: "menu.reports.chapter.palms.summary",
     IdOrg: params.IdOrg,
@@ -640,18 +636,13 @@ async function readSummaryKpis(tab) {
     __heading_country: params.__heading_country,
     __orientation: "ltr",
   };
-  const [sixText, fourText] = await Promise.all([
-    generateReport(base, sixStart, end, headers),
-    generateReport(base, fourStart, end, headers),
-  ]);
+  const sixText = await generateReport(base, sixStart, end, headers);
   const six = parseKpiReport(sixText),
-    four = parseKpiReport(fourText),
-    visitors = new Map(four.map((item) => [normalize(item.member), item.visitors])),
     weeks = Math.max(1, (end - sixStart) / 604800000);
   return six.map((item) => ({
     member: item.member,
     trainingPoints: Math.round(item.education),
-    visitorCount: Math.round(visitors.get(normalize(item.member)) || 0),
+    visitorCount: Math.round(item.visitors || 0),
     oneToOneWeeklyAverage: Number((item.oneToOne / weeks).toFixed(2)),
     referralWeeklyAverage: Number(((item.inside + item.outside) / weeks).toFixed(2)),
     dreamReferralAmount: Math.round(item.referralAmount),
