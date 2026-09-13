@@ -69,3 +69,5 @@ export const memberKpiState = sqliteTable("member_kpi_state", {
   dreamReferralAmount: integer("dream_referral_amount"),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const attendanceAlertAckState=sqliteTable("attendance_alert_ack_state",{id:integer("id").primaryKey(),acknowledgements:text("acknowledgements").notNull().default("[]"),updatedAt:text("updated_at").notNull()});

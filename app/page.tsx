@@ -423,7 +423,8 @@ export default function Home() {
     [hidePerfectAttendance,setHidePerfectAttendance]=useState(false),
     [memberSearch,setMemberSearch]=useState(""),
     [selectedMember,setSelectedMember]=useState(""),
-    [hideClearMembers,setHideClearMembers]=useState(false);
+    [hideClearMembers,setHideClearMembers]=useState(false),
+    [acknowledgedAttendanceAlerts,setAcknowledgedAttendanceAlerts]=useState<string[]>([]);
   const [notice, setNotice] = useState(""),
     [note, setNote] = useState(""),
     [meetingReady, setMeetingReady] = useState(false),
@@ -499,6 +500,7 @@ export default function Home() {
     fetch("/api/member-care-owners").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.assignments))setCareAssignments(data.assignments)}).catch(()=>{});
     fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
     fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set(data.members.map((name:string)=>normalizeMemberName(name))))}).catch(()=>{});
+    fetch("/api/attendance-alert-acks").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.acknowledgements))setAcknowledgedAttendanceAlerts(data.acknowledgements)}).catch(()=>{});
   }, []);
   useEffect(()=>{const refresh=()=>fetch("/api/bni-sync/status").then(r=>r.ok?r.json():null).then(data=>setConnectSyncStatus(data?.status||null)).catch(()=>{});refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{fetch("/api/admin-schedules").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.schedules)&&data.schedules.length)setDutySchedules(data.schedules)}).catch(()=>{})},[]);
@@ -521,6 +523,8 @@ export default function Home() {
   const qualityAlerts=useMemo(()=>attendanceSummary.rows.flatMap(([member,row])=>{const alerts:{member:string;reason:string;level:string;count:number}[]=[];if(row.absent>=4)alerts.push({member,reason:"六個月缺席達 4 次",level:"回報領導團隊",count:row.absent});else if(row.absent===3)alerts.push({member,reason:"六個月缺席達 3 次",level:"發送 B 信",count:row.absent});else if(row.absent===2)alerts.push({member,reason:"六個月缺席達 2 次",level:"發送 A 信",count:row.absent});else if(row.absent===1)alerts.push({member,reason:"六個月缺席 1 次",level:"組長關懷",count:row.absent});if(row.substitute>=3)alerts.push({member,reason:`六個月代理 ${row.substitute} 次`,level:"通知組長關懷",count:row.substitute});return alerts}).sort((a,b)=>b.count-a.count),[attendanceSummary]);
   const oralCareAlerts=qualityAlerts.filter(alert=>alert.level==="組長關懷");
   const agendaAttendanceAlerts=qualityAlerts.filter(alert=>alert.level!=="組長關懷");
+  const attendanceAlertKey=(alert:(typeof qualityAlerts)[number])=>`${normalizeMemberName(alert.member)}|${alert.level}`;
+  const visibleAgendaAttendanceAlerts=agendaAttendanceAlerts.filter(alert=>!acknowledgedAttendanceAlerts.includes(attendanceAlertKey(alert)));
   const trackedMonthKeys = trackingMonthKeys();
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
@@ -596,19 +600,26 @@ export default function Home() {
       },
       {
         title: "出席與會員狀況",
-        items: agendaAttendanceAlerts.length ? agendaAttendanceAlerts.map(alert=>`${alert.member}｜${alert.reason}｜${alert.level}`) : ["目前沒有達到 A 信、B 信或三次代理門檻的會員"],
+        items: visibleAgendaAttendanceAlerts.length ? visibleAgendaAttendanceAlerts.map(alert=>`${alert.member}｜${alert.reason}｜${alert.level}`) : ["目前沒有新的 A 信、B 信或三次代理警戒"],
       },
       {
         title: "決議與分工",
         items: ["逐項指定負責人與期限", "確認需延至下週的事項"],
       },
     ],
-    [openTasks, trackedRenewals, activeVisitors, agendaAttendanceAlerts],
+    [openTasks, trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts],
   );
   const activeAgenda = reopenedAgenda || agenda;
   function flash(message: string) {
     setNotice(message);
     setTimeout(() => setNotice(""), 2400);
+  }
+  async function acknowledgeAttendanceAlert(alert:(typeof qualityAlerts)[number]){
+    const key=attendanceAlertKey(alert),next=[...new Set([...acknowledgedAttendanceAlerts,key])];
+    setAcknowledgedAttendanceAlerts(next);
+    const response=await fetch("/api/attendance-alert-acks",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({acknowledgements:next})});
+    if(!response.ok){setAcknowledgedAttendanceAlerts(acknowledgedAttendanceAlerts);flash("確認狀態儲存失敗，請再試一次");return}
+    flash(`${alert.member} 的${alert.level}層級已確認；狀況升級時會重新顯示`);
   }
   function updateActiveMemberKpi(field:keyof Pick<MemberKpi,"trainingPoints"|"visitorCount"|"oneToOneWeeklyAverage"|"referralWeeklyAverage"|"referralTotal"|"dreamReferralAmount">,value:string){
     if(!activeMemberProfile)return;
@@ -1251,8 +1262,8 @@ export default function Home() {
                       ) : g.title === "出席與會員狀況" ? (
                         <div className="meeting-quality">
                           <section className="meeting-quality-cases">
-                            <header><b>本週警戒名單</b><span>{agendaAttendanceAlerts.length} 人次</span></header>
-                            {agendaAttendanceAlerts.length===0?<p>目前沒有達到 A 信、B 信或三次代理門檻的會員</p>:agendaAttendanceAlerts.map((alert,j)=><article key={`${alert.member}-${alert.level}`} className={checkedAgenda.includes(`${i}-alert-${j}`)?"discussed":""}><div className="meeting-quality-head"><input type="checkbox" checked={checkedAgenda.includes(`${i}-alert-${j}`)} onChange={()=>toggleAgenda(`${i}-alert-${j}`)}/><div><b>{alert.member}</b><small>{alert.reason}・{alert.level}</small></div></div><div className="meeting-quality-route"><span>{careAssignment(alert.member)?`第 ${careAssignment(alert.member)?.groupId} 組｜委員：${careAssignment(alert.member)?.committee||"未設定"}｜小組長：${careAssignment(alert.member)?.leader||"未設定"}`:"尚未分組・待補負責人"}</span></div></article>)}
+                            <header><b>本週警戒名單</b><span>{visibleAgendaAttendanceAlerts.length} 人次</span></header>
+                            {visibleAgendaAttendanceAlerts.length===0?<p>目前沒有新的 A 信、B 信或三次代理警戒</p>:visibleAgendaAttendanceAlerts.map((alert)=><article key={`${alert.member}-${alert.level}`}><div className="meeting-quality-head"><input type="checkbox" checked={false} onChange={()=>acknowledgeAttendanceAlert(alert)}/><div><b>{alert.member}</b><small>{alert.reason}・{alert.level}</small></div></div><div className="meeting-quality-route"><span>{careAssignment(alert.member)?`第 ${careAssignment(alert.member)?.groupId} 組｜委員：${careAssignment(alert.member)?.committee||"未設定"}｜小組長：${careAssignment(alert.member)?.leader||"未設定"}`:"尚未分組・待補負責人"}</span></div></article>)}
                           </section>
                           <section className="meeting-quality-cases">
                             <header><b>A／B 信與未結案件</b><span>{openQualityCases.length} 件</span></header>

@@ -101,6 +101,22 @@ const worker = {
       return apiJson({error:"不支援的 KPI 資料操作"},405);
     }
 
+    if(url.pathname==="/api/attendance-alert-acks"){
+      if(!env.DB)return apiJson({error:"資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_alert_ack_state (id INTEGER PRIMARY KEY CHECK (id=1), acknowledgements TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      if(request.method==="GET"){
+        const row=await env.DB.prepare(`SELECT acknowledgements, updated_at AS updatedAt FROM attendance_alert_ack_state WHERE id=1`).first<{acknowledgements:string;updatedAt:string}>();
+        return apiJson({acknowledgements:JSON.parse(row?.acknowledgements||"[]"),updatedAt:row?.updatedAt||null});
+      }
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,items=Array.isArray(body.acknowledgements)?body.acknowledgements.map(value=>String(value).trim()).filter(Boolean):[];
+        const acknowledgements=[...new Set(items)].slice(0,1000),updatedAt=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO attendance_alert_ack_state (id,acknowledgements,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET acknowledgements=excluded.acknowledgements,updated_at=excluded.updated_at`).bind(JSON.stringify(acknowledgements),updatedAt).run();
+        return apiJson({ok:true,acknowledgements,updatedAt});
+      }
+      return apiJson({error:"不支援的確認狀態操作"},405);
+    }
+
     if(url.pathname==="/api/bni-connect/session"){
       const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
       if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以設定 BNI Connect"},403);
