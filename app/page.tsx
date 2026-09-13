@@ -401,7 +401,7 @@ function upcomingThursdayKey(){const base=new Date(`${taipeiDateKey()}T12:00:00+
 const trainingScore=(value:number)=>value>=6?15:value>=4?10:value>=2?5:0;
 const visitorScore=(value:number,weeks:number)=>value>=weeks/2?15:value>=weeks/4?10:0;
 const oneToOneScore=(value:number)=>value>=2?15:value>=1?10:value>=0.5?5:0;
-const referralScore=(value:number)=>value>2?20:value>1.2?15:value>1?10:value===1?5:0;
+const referralScore=(value:number)=>value>=1.5?20:value>=1.2?15:value>=1?10:value>=0.75?5:0;
 const dreamReferralScore=(value:number)=>value>=2000000?15:value>800000?10:value>400000?5:0;
 
 export default function Home() {
