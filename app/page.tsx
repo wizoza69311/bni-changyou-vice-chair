@@ -520,6 +520,7 @@ export default function Home() {
   const visibleAttendanceMembers=useMemo(()=>hidePerfectAttendance?attendanceMatrix.members.filter(member=>!attendanceMatrix.dates.every(date=>attendanceMatrix.lookup.get(`${member}|${date}`)==="P")):attendanceMatrix.members,[attendanceMatrix,hidePerfectAttendance]);
   const qualityAlerts=useMemo(()=>attendanceSummary.rows.flatMap(([member,row])=>{const alerts:{member:string;reason:string;level:string;count:number}[]=[];if(row.absent>=4)alerts.push({member,reason:"六個月缺席達 4 次",level:"回報領導團隊",count:row.absent});else if(row.absent===3)alerts.push({member,reason:"六個月缺席達 3 次",level:"發送 B 信",count:row.absent});else if(row.absent===2)alerts.push({member,reason:"六個月缺席達 2 次",level:"發送 A 信",count:row.absent});else if(row.absent===1)alerts.push({member,reason:"六個月缺席 1 次",level:"組長關懷",count:row.absent});if(row.substitute>=3)alerts.push({member,reason:`六個月代理 ${row.substitute} 次`,level:"通知組長關懷",count:row.substitute});return alerts}).sort((a,b)=>b.count-a.count),[attendanceSummary]);
   const oralCareAlerts=qualityAlerts.filter(alert=>alert.level==="組長關懷");
+  const agendaAttendanceAlerts=qualityAlerts.filter(alert=>alert.level!=="組長關懷");
   const trackedMonthKeys = trackingMonthKeys();
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
@@ -595,14 +596,14 @@ export default function Home() {
       },
       {
         title: "出席與會員狀況",
-        items: openQualityCases.length||oralCareAlerts.length ? [...openQualityCases.map(item=>`${item.member}｜${item.issue}｜${item.status}｜${item.owner||"未指派"}`),...oralCareAlerts.map(item=>`${item.member}｜一次缺席｜組長口頭關懷`)] : ["確認本週 PALMS 與缺席名單", "確認是否需要發送 A 信／B 信"],
+        items: agendaAttendanceAlerts.length ? agendaAttendanceAlerts.map(alert=>`${alert.member}｜${alert.reason}｜${alert.level}`) : ["目前沒有達到 A 信、B 信或三次代理門檻的會員"],
       },
       {
         title: "決議與分工",
         items: ["逐項指定負責人與期限", "確認需延至下週的事項"],
       },
     ],
-    [openTasks, trackedRenewals, activeVisitors, openQualityCases, oralCareAlerts],
+    [openTasks, trackedRenewals, activeVisitors, agendaAttendanceAlerts],
   );
   const activeAgenda = reopenedAgenda || agenda;
   function flash(message: string) {
