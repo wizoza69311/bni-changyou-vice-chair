@@ -315,6 +315,7 @@ async function readPersonalPalms(tabId) {
           referralWeeklyAverage: Number(
             ((inside + outside) / weeks).toFixed(2),
           ),
+          referralTotal: Math.round(inside + outside),
           dreamReferralAmount: Math.round(amount),
         };
         if (
@@ -645,6 +646,7 @@ async function readSummaryKpis(tab) {
     visitorCount: Math.round(item.visitors || 0),
     oneToOneWeeklyAverage: Number((item.oneToOne / weeks).toFixed(2)),
     referralWeeklyAverage: Number(((item.inside + item.outside) / weeks).toFixed(2)),
+    referralTotal: Math.round(item.inside + item.outside),
     dreamReferralAmount: Math.round(item.referralAmount),
   }));
 }

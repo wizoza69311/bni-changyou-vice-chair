@@ -88,7 +88,7 @@ type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
 type MemberGroup={id:number;name:string;members:GroupMember[]};
 type CareAssignment={member:string;groupId:number;committee:string;leader:string};
-type MemberKpi={member:string;trainingPoints:number|null;visitorCount:number|null;oneToOneWeeklyAverage:number|null;referralWeeklyAverage:number|null;dreamReferralAmount:number|null;updatedAt?:string};
+type MemberKpi={member:string;trainingPoints:number|null;visitorCount:number|null;oneToOneWeeklyAverage:number|null;referralWeeklyAverage:number|null;referralTotal?:number|null;dreamReferralAmount:number|null;updatedAt?:string};
 const qualityIssueOptions:{value:QualityCase["issue"];label:string}[]=[{value:"缺席",label:"缺席"},{value:"遲到",label:"遲到"},{value:"替代人",label:"替代人"},{value:"A信",label:"需要 A 信"},{value:"B信",label:"需要 B 信"},{value:"關懷",label:"需要組長關懷"}];
 const qualityIssueLabel=(issue:QualityCase["issue"])=>qualityIssueOptions.find(option=>option.value===issue)?.label||issue;
 const letterText=(issue:"A信"|"B信",member:string)=>issue==="A信"?`親愛的 ${member} 會員，
@@ -541,12 +541,13 @@ export default function Home() {
   const activeMemberKpi:MemberKpi=memberKpis.find(item=>normalizeMemberName(item.member)===normalizeMemberName(activeMemberProfile?.name||""))||{member:activeMemberProfile?.name||"",trainingPoints:null,visitorCount:null,oneToOneWeeklyAverage:null,referralWeeklyAverage:null,dreamReferralAmount:null};
   const memberKpiWeekCount=Math.max(1,attendanceMatrix.dates.length);
   const visitorFullScoreThreshold=Math.ceil(memberKpiWeekCount/2),visitorPartialScoreThreshold=Math.ceil(memberKpiWeekCount/4);
+  const activeReferralWeeklyAverage=activeMemberKpi.referralTotal==null?activeMemberKpi.referralWeeklyAverage:Number((activeMemberKpi.referralTotal/memberKpiWeekCount).toFixed(2));
   const activeKpiScores=activeMemberProfile?{
     attendance:activeMemberProfile.records.length?activeMemberProfile.attendancePoints:null,
     training:activeMemberKpi.trainingPoints===null?null:trainingScore(activeMemberKpi.trainingPoints),
     visitors:activeMemberKpi.visitorCount===null?null:visitorScore(activeMemberKpi.visitorCount,memberKpiWeekCount),
     oneToOne:activeMemberKpi.oneToOneWeeklyAverage===null?null:oneToOneScore(activeMemberKpi.oneToOneWeeklyAverage),
-    referrals:activeMemberKpi.referralWeeklyAverage===null?null:referralScore(activeMemberKpi.referralWeeklyAverage),
+    referrals:activeReferralWeeklyAverage===null?null:referralScore(activeReferralWeeklyAverage),
     dreamReferral:activeMemberKpi.dreamReferralAmount===null?null:dreamReferralScore(activeMemberKpi.dreamReferralAmount),
   }:null;
   const activeKpiValues=activeKpiScores?Object.values(activeKpiScores):[],activeKpiComplete=activeKpiValues.length===6&&activeKpiValues.every(value=>value!==null),activeKpiTotal=activeKpiComplete?activeKpiValues.reduce<number>((sum,value)=>sum+(value||0),0):null;
@@ -608,7 +609,7 @@ export default function Home() {
     setNotice(message);
     setTimeout(() => setNotice(""), 2400);
   }
-  function updateActiveMemberKpi(field:keyof Pick<MemberKpi,"trainingPoints"|"visitorCount"|"oneToOneWeeklyAverage"|"referralWeeklyAverage"|"dreamReferralAmount">,value:string){
+  function updateActiveMemberKpi(field:keyof Pick<MemberKpi,"trainingPoints"|"visitorCount"|"oneToOneWeeklyAverage"|"referralWeeklyAverage"|"referralTotal"|"dreamReferralAmount">,value:string){
     if(!activeMemberProfile)return;
     const memberKey=normalizeMemberName(activeMemberProfile.name),nextValue=value===""?null:Number(value),existing=memberKpis.find(item=>normalizeMemberName(item.member)===memberKey),next={...(existing||activeMemberKpi),member:activeMemberProfile.name,[field]:nextValue};
     setMemberKpis(records=>existing?records.map(item=>normalizeMemberName(item.member)===memberKey?next:item):[...records,next]);
@@ -1010,7 +1011,7 @@ export default function Home() {
                       <article className={activeKpiScores?.training===null?"":"ready"}><span>培訓（六個月點數）</span><b>{activeKpiScores?.training??"—"}<small>／15</small></b><input aria-label="培訓點數" type="number" min="0" step="1" value={activeMemberKpi.trainingPoints??""} onChange={event=>updateActiveMemberKpi("trainingPoints",event.target.value)} placeholder="輸入點數"/></article>
                       <article className={activeKpiScores?.visitors===null?"":"ready"}><span>六個月來賓（{memberKpiWeekCount} 週）</span><b>{activeKpiScores?.visitors??"—"}<small>／15</small></b><p>{visitorPartialScoreThreshold} 位起得 10 分・{visitorFullScoreThreshold} 位得 15 分</p><input aria-label="六個月來賓人數" type="number" min="0" step="1" value={activeMemberKpi.visitorCount??""} onChange={event=>updateActiveMemberKpi("visitorCount",event.target.value)} placeholder="輸入六個月總人數"/></article>
                       <article className={activeKpiScores?.oneToOne===null?"":"ready"}><span>每週一對一（平均）</span><b>{activeKpiScores?.oneToOne??"—"}<small>／15</small></b><input aria-label="每週一對一平均" type="number" min="0" step="0.1" value={activeMemberKpi.oneToOneWeeklyAverage??""} onChange={event=>updateActiveMemberKpi("oneToOneWeeklyAverage",event.target.value)} placeholder="例如 1.5"/></article>
-                      <article className={activeKpiScores?.referrals===null?"":"ready"}><span>每週引薦（平均）</span><b>{activeKpiScores?.referrals??"—"}<small>／20</small></b><input aria-label="每週引薦平均" type="number" min="0" step="0.1" value={activeMemberKpi.referralWeeklyAverage??""} onChange={event=>updateActiveMemberKpi("referralWeeklyAverage",event.target.value)} placeholder="例如 1.2"/></article>
+                      <article className={activeKpiScores?.referrals===null?"":"ready"}><span>六個月引薦（{memberKpiWeekCount} 週）</span><b>{activeKpiScores?.referrals??"—"}<small>／20</small></b><p>{activeMemberKpi.referralTotal==null?"尚未同步引薦總數":`${activeMemberKpi.referralTotal} 張 ÷ ${memberKpiWeekCount} 週 ＝ 每週 ${activeReferralWeeklyAverage} 張`}</p><input aria-label="六個月引薦總數" type="number" min="0" step="1" value={activeMemberKpi.referralTotal??""} onChange={event=>updateActiveMemberKpi("referralTotal",event.target.value)} placeholder="輸入內外部引薦總數"/></article>
                       <article className={activeKpiScores?.dreamReferral===null?"":"ready"}><span>夢幻引薦金額（六個月）</span><b>{activeKpiScores?.dreamReferral??"—"}<small>／15</small></b><input aria-label="夢幻引薦金額" type="number" min="0" step="10000" value={activeMemberKpi.dreamReferralAmount??""} onChange={event=>updateActiveMemberKpi("dreamReferralAmount",event.target.value)} placeholder="輸入金額"/></article>
                     </div>
                     <div className="kpi-actions"><p className="score-sync-note">空白欄位維持「待補」，不會當成 0 分；全部六項完整後才產生總分與燈號。</p><button type="button" onClick={saveActiveMemberKpi}>儲存 KPI 資料</button></div>

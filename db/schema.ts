@@ -65,6 +65,7 @@ export const memberKpiState = sqliteTable("member_kpi_state", {
   visitorCount: integer("visitor_count"),
   oneToOneWeeklyAverage: real("one_to_one_weekly_average"),
   referralWeeklyAverage: real("referral_weekly_average"),
+  referralTotal: integer("referral_total"),
   dreamReferralAmount: integer("dream_referral_amount"),
   updatedAt: text("updated_at").notNull(),
 });
