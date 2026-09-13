@@ -1251,6 +1251,10 @@ export default function Home() {
                       ) : g.title === "出席與會員狀況" ? (
                         <div className="meeting-quality">
                           <section className="meeting-quality-cases">
+                            <header><b>本週警戒名單</b><span>{agendaAttendanceAlerts.length} 人次</span></header>
+                            {agendaAttendanceAlerts.length===0?<p>目前沒有達到 A 信、B 信或三次代理門檻的會員</p>:agendaAttendanceAlerts.map((alert,j)=><article key={`${alert.member}-${alert.level}`} className={checkedAgenda.includes(`${i}-alert-${j}`)?"discussed":""}><div className="meeting-quality-head"><input type="checkbox" checked={checkedAgenda.includes(`${i}-alert-${j}`)} onChange={()=>toggleAgenda(`${i}-alert-${j}`)}/><div><b>{alert.member}</b><small>{alert.reason}・{alert.level}</small></div></div><div className="meeting-quality-route"><span>{careAssignment(alert.member)?`第 ${careAssignment(alert.member)?.groupId} 組｜委員：${careAssignment(alert.member)?.committee||"未設定"}｜小組長：${careAssignment(alert.member)?.leader||"未設定"}`:"尚未分組・待補負責人"}</span></div></article>)}
+                          </section>
+                          <section className="meeting-quality-cases">
                             <header><b>A／B 信與未結案件</b><span>{openQualityCases.length} 件</span></header>
                             {openQualityCases.length===0?<p>目前沒有未結案件</p>:openQualityCases.map((item,j)=><article key={item.id} className={checkedAgenda.includes(`${i}-case-${j}`)?"discussed":""}>
                               <div className="meeting-quality-head"><input type="checkbox" checked={checkedAgenda.includes(`${i}-case-${j}`)} onChange={()=>toggleAgenda(`${i}-case-${j}`)}/><div><b>{item.member}</b><small>{qualityIssueLabel(item.issue)}・{fmt(item.occurredDate)}</small></div></div>
@@ -1258,10 +1262,6 @@ export default function Home() {
                               <div className="meeting-quality-fields"><label><span>處理進度</span><select value={item.status} onChange={event=>updateQualityCase(item.id,{status:event.target.value as QualityCase["status"]})}>{["待處理","聯絡中","已結案"].map(status=><option key={status}>{status}</option>)}</select></label><label><span>負責委員</span><select value={item.owner} onChange={event=>updateQualityCase(item.id,{owner:event.target.value})}><option value="">未指派</option>{careOwnerNames.map(member=><option key={member}>{member}</option>)}</select></label><label className="meeting-quality-note"><span>本週處理紀錄</span><input value={item.note} onChange={event=>setQualityCases(current=>current.map(currentItem=>currentItem.id===item.id?{...currentItem,note:event.target.value}:currentItem))} onBlur={event=>updateQualityCase(item.id,{note:event.target.value})} placeholder="輸入寄信、聯絡或後續安排…"/></label></div>
                               {(item.issue==="A信"||item.issue==="B信")&&<details className="meeting-letter"><summary>查看 {item.issue} 範本</summary><pre>{letterText(item.issue,item.member)}</pre><button type="button" onClick={()=>copyLetter(item.issue as "A信"|"B信",item.member)}>複製信件</button></details>}
                             </article>)}
-                          </section>
-                          <section className="meeting-oral-care">
-                            <header><b>一次缺席・組長口頭關懷</b><span>{oralCareAlerts.length} 人</span></header>
-                            {oralCareAlerts.length===0?<p>本週沒有口頭關懷名單</p>:oralCareAlerts.map((alert,j)=><label key={alert.member}><input type="checkbox" checked={checkedAgenda.includes(`${i}-oral-${j}`)} onChange={()=>toggleAgenda(`${i}-oral-${j}`)}/><div><b>{alert.member}</b><small>{alert.reason}・{careAssignment(alert.member)?`第 ${careAssignment(alert.member)?.groupId} 組・小組長 ${careAssignment(alert.member)?.leader||"未設定"}`:"尚未分組"}・無需建立案件</small></div></label>)}
                           </section>
                         </div>
                       ) : (
