@@ -53,6 +53,7 @@ type Task = {
   owner: string;
   dueDate: string;
   status: "todo" | "doing" | "done";
+  source?:"meeting";
   updatedAt?:string;
 };
 type Visitor = {
@@ -445,6 +446,8 @@ export default function Home() {
       { title: string; items: string[] }[] | null
     >(null);
   const [visitorDraft,setVisitorDraft]=useState({name:"",email:"",inviter:"",profession:""});
+  const [decisionDraft,setDecisionDraft]=useState("");
+  const [decisionOwner,setDecisionOwner]=useState("");
   const [visitorRelayDraft,setVisitorRelayDraft]=useState("");
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
@@ -517,6 +520,7 @@ export default function Home() {
   useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="members"))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
+  const meetingDecisionTasks=openTasks.filter(task=>task.source==="meeting");
   const openQualityCases=qualityCases.filter(item=>item.status!=="已結案"&&activeMemberNames.has(normalizeMemberName(item.member)));
   const visibleQualityCases=qualityCases.filter(item=>activeMemberNames.has(normalizeMemberName(item.member)));
   const assignedMemberNames=useMemo(()=>new Set(memberGroups.flatMap(group=>group.members.map(member=>member.name))),[memberGroups]);
@@ -609,10 +613,10 @@ export default function Home() {
       },
       {
         title: "決議與分工",
-        items: ["逐項指定負責人與期限", "確認需延至下週的事項"],
+        items: meetingDecisionTasks.map(task=>`${task.owner}｜${task.title}`),
       },
     ],
-    [trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts],
+    [trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts, meetingDecisionTasks],
   );
   const activeAgenda = reopenedAgenda || agenda;
   function flash(message: string) {
@@ -753,6 +757,15 @@ export default function Home() {
     setTasks(next);
     patchTask(created.id,created,"create");
     flash("已加入委員待辦");
+  }
+  function addMeetingDecision(){
+    if(!decisionDraft.trim()||!decisionOwner){flash("請輸入決議事項並指派委員");return}
+    const created:Task={id:Date.now(),title:decisionDraft.trim(),owner:decisionOwner,dueDate:archiveDate,status:"todo",source:"meeting"};
+    setTasks(current=>[...current,created]);
+    setDecisionDraft("");
+    setDecisionOwner("");
+    patchTask(created.id,created,"create");
+    flash("臨時決議已新增並指派");
   }
   function toggleAgenda(key: string) {
     setCheckedAgenda((current) =>
@@ -1283,6 +1296,11 @@ export default function Home() {
                             </article>)}
                           </section>
                         </div>
+                      ) : g.title === "決議與分工"&&!reopenedAgenda ? (
+                        <div className="task-list meeting-decisions">
+                          {meetingDecisionTasks.length===0?<p>目前沒有臨時決議</p>:meetingDecisionTasks.map(task=><label key={task.id}><input type="checkbox" checked={false} onChange={()=>toggleTask(task.id)}/><div><b>{task.title}</b><small>負責委員：{task.owner}</small></div></label>)}
+                          <div className="quick-add"><input value={decisionDraft} onChange={e=>setDecisionDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addMeetingDecision()} placeholder="新增臨時決議或交辦事項…"/><select value={decisionOwner} onChange={e=>setDecisionOwner(e.target.value)}><option value="">指派委員</option>{committeeMembers.map(member=><option key={member}>{member}</option>)}</select><button type="button" onClick={addMeetingDecision}>＋ 新增</button></div>
+                        </div>
                       ) : (
                         g.items.map((x, j) => (
                           <label key={j}>
@@ -1301,12 +1319,7 @@ export default function Home() {
                 ))}
               </div>
               <aside className="panel meeting-note">
-                <h3>會議決議速記</h3>
-                <textarea
-                  value={meetingNotes}
-                  onChange={(e) => setMeetingNotes(e.target.value)}
-                  placeholder="會議中直接記錄決議、負責人與期限…"
-                />
+                <h3>完成本週會議</h3>
                 <button
                   className="archive-button"
                   onClick={archiveWeek}
@@ -1314,7 +1327,7 @@ export default function Home() {
                 >
                   {archiving ? "建檔中…" : "完成並建檔"}
                 </button>
-                <small>會後會將未完成項目帶到下週議程</small>
+                <small>臨時決議已記錄於「決議與分工」並同步到委員待辦</small>
               </aside>
             </section>
           )}
