@@ -11,6 +11,8 @@ interface Env {
   BNI_TOKEN_ENCRYPTION_KEY?: string;
   BNI_USERNAME?: string;
   BNI_PASSWORD?: string;
+  BNI_RUNNER_URL?: string;
+  BNI_RUNNER_TOKEN?: string;
   ZOOM_ACCOUNT_ID?: string;
   ZOOM_CLIENT_ID?: string;
   ZOOM_CLIENT_SECRET?: string;
@@ -150,6 +152,11 @@ const worker = {
       if(running?.state==="running"&&Date.now()-new Date(running.updatedAt).getTime()<180000)return apiJson({error:"資料正在更新中，請稍候查看結果"},409);
       const startedAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,'running',?) ON CONFLICT(id) DO UPDATE SET state='running',updated_at=excluded.updated_at`).bind(startedAt).run();
       try{
+        if(env.BNI_RUNNER_URL&&env.BNI_RUNNER_TOKEN){
+          const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/sync`,{method:"POST",headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`,"content-type":"application/json"},body:JSON.stringify({siteOrigin:url.origin})}),result=await response.json() as Record<string,unknown>;
+          if(!response.ok)throw new Error(String(result.error||`瀏覽器同步服務失敗（${response.status}）`));
+          await env.DB.prepare(`UPDATE bni_sync_run SET state='success',updated_at=? WHERE id=1`).bind(new Date().toISOString()).run();return apiJson(result);
+        }
         const stored=await env.DB.prepare(`SELECT encrypted_session AS encryptedSession FROM bni_connect_session WHERE id=1`).first<{encryptedSession:string}>();
         if(!stored?.encryptedSession)throw new Error("尚未建立 BNI Connect 伺服器連線");
         const keyBytes=Uint8Array.from(atob(env.BNI_TOKEN_ENCRYPTION_KEY),char=>char.charCodeAt(0)),cryptoKey=await crypto.subtle.importKey("raw",keyBytes,{name:"AES-GCM"},false,["encrypt","decrypt"]),[ivText,cipherText]=stored.encryptedSession.split("."),iv=Uint8Array.from(atob(ivText),char=>char.charCodeAt(0)),cipher=Uint8Array.from(atob(cipherText),char=>char.charCodeAt(0)),plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},cryptoKey,cipher),session=JSON.parse(new TextDecoder().decode(plain)) as {accessToken:string;refreshToken:string};
@@ -236,7 +243,8 @@ const worker = {
       const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(bearer))),b=>b.toString(16).padStart(2,"0")).join("");
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
       const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>();
-      if(!bearer||!credential?.keyHash||digest!==credential.keyHash)return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
+      const runnerAuthorized=Boolean(env.BNI_RUNNER_TOKEN&&bearer===env.BNI_RUNNER_TOKEN);
+      if(!runnerAuthorized&&(!bearer||!credential?.keyHash||digest!==credential.keyHash))return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
       const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],kpis=Array.isArray(body.kpis)?body.kpis:[],members=Array.isArray(body.members)?body.members.map(value=>String(value).trim()).filter(Boolean):[],renewalRows=Array.isArray(body.renewals)?body.renewals:[],failedMembers=Array.isArray(body.failedMembers)?body.failedMembers.map(value=>String(value).trim()).filter(Boolean):[];
       const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code))).map((x:any)=>({member:String(x.member).trim(),date:String(x.date),code:String(x.code)}));
       const validKpis=kpis.filter((x:any)=>x&&typeof x.member==="string"&&String(x.member).trim()&&[x.trainingPoints,x.visitorCount,x.oneToOneWeeklyAverage,x.referralWeeklyAverage,x.referralTotal,x.dreamReferralAmount].every(value=>Number.isFinite(Number(value))&&Number(value)>=0)).map((x:any)=>({member:String(x.member).trim(),trainingPoints:Math.round(Number(x.trainingPoints)),visitorCount:Math.round(Number(x.visitorCount)),oneToOneWeeklyAverage:Number(x.oneToOneWeeklyAverage),referralWeeklyAverage:Number(x.referralWeeklyAverage),referralTotal:Math.round(Number(x.referralTotal)),dreamReferralAmount:Math.round(Number(x.dreamReferralAmount))}));

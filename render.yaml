@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: bni-changyou-sync
+    runtime: docker
+    rootDir: sync-service
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: BNI_USERNAME
+        sync: false
+      - key: BNI_PASSWORD
+        sync: false
+      - key: BNI_RUNNER_TOKEN
+        generateValue: true
+      - key: SITE_URL
+        value: https://bni-changyou-vice-chair.wizoza69311.chatgpt.site
