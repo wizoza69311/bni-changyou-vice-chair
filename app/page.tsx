@@ -591,10 +591,6 @@ export default function Home() {
   const agenda = useMemo(
     () => [
       {
-        title: "上週未結事項",
-        items: openTasks.slice(0, 3).map((t) => `${t.owner}｜${t.title}`),
-      },
-      {
         title: "來賓追蹤",
         items: activeVisitors.map(
           (visitor) =>
@@ -616,7 +612,7 @@ export default function Home() {
         items: ["逐項指定負責人與期限", "確認需延至下週的事項"],
       },
     ],
-    [openTasks, trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts],
+    [trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts],
   );
   const activeAgenda = reopenedAgenda || agenda;
   function flash(message: string) {
@@ -1054,7 +1050,7 @@ export default function Home() {
                       {archiveDate.replaceAll("-", " / ")} · 每週委員會
                     </small>
                     <h2>長佑分會會員委員會議程</h2>
-                    <p>建議時間 15 分鐘 · 系統依續約與未結待辦自動整理</p>
+                    <p>建議時間 15 分鐘 · 系統依來賓、續約與出缺席狀況自動整理</p>
                   </div>
                   <button
                     onClick={() => {
