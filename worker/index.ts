@@ -9,6 +9,8 @@ interface Env {
   GROUPS_API_KEY?: string;
   GROUPS_READ_API_KEY?: string;
   BNI_TOKEN_ENCRYPTION_KEY?: string;
+  BNI_USERNAME?: string;
+  BNI_PASSWORD?: string;
   ZOOM_ACCOUNT_ID?: string;
   ZOOM_CLIENT_ID?: string;
   ZOOM_CLIENT_SECRET?: string;
@@ -29,6 +31,28 @@ interface ExecutionContext {
 
 let localZoomCredentials: { accountId:string; clientId:string; clientSecret:string } | null = null;
 let localOpenAIKey: string | null = null;
+
+const bniNormalize=(value:unknown)=>String(value||"").toLowerCase().replace(/[\s_\-–—／/()（）:：.]/g,"");
+const bniNumber=(value:unknown)=>{const parsed=Number(String(value||"").replace(/[^\d.-]/g,""));return Number.isFinite(parsed)?parsed:0};
+const xmlDecode=(value:string)=>value.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");
+function bniSpreadsheetRows(text:string){
+  const rows:string[][]=[];
+  for(const rowMatch of text.matchAll(/<(?:\w+:)?Row\b[^>]*>([\s\S]*?)<\/(?:\w+:)?Row>/gi)){
+    const row:string[]=[],body=rowMatch[1];let cursor=0;
+    for(const cell of body.matchAll(/<(?:\w+:)?Cell\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?Cell>/gi)){
+      const index=cell[1].match(/(?:ss:)?Index=["'](\d+)["']/i);if(index)cursor=Number(index[1])-1;
+      const data=cell[2].match(/<(?:\w+:)?Data\b[^>]*>([\s\S]*?)<\/(?:\w+:)?Data>/i);row[cursor]=xmlDecode((data?.[1]||"").replace(/<[^>]+>/g,"")).trim();cursor++;
+    }
+    if(row.length)rows.push(row);
+  }
+  if(!rows.length)throw new Error("BNI 回傳的報表格式無法辨識");return rows;
+}
+const bniColumn=(headers:string[],names:string[])=>headers.findIndex(header=>names.some(name=>bniNormalize(header).includes(bniNormalize(name))));
+const bniAliases={member:["會員姓名","會員","membername","member"],surname:["姓氏","lastname","surname"],givenName:["名字","firstname","givenname"],education:["教育分數","教育點數","培訓分數","educationpoints","educationunits","ceu","分會教育單位"],inside:["內部引薦","內引薦","referralsgiveninside","referralsinside","rgbi"],outside:["外部引薦","外引薦","referralsgivenoutside","referralsoutside","rgbo"],referralAmount:["提供的引薦金額","引薦金額","商機金額","referralamount","referralsgivenamount","businessgiven","交易價值"],visitors:["來賓","訪客","visitors","visitor"],oneToOne:["一對一","121","1to1","onetoone","onetoones"]};
+function bniParseDate(value:unknown){const text=String(value||"").trim();let match=text.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);if(match)return `${match[1]}-${match[2].padStart(2,"0")}-${match[3].padStart(2,"0")}`;match=text.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);return match?`${match[3]}-${match[2].padStart(2,"0")}-${match[1].padStart(2,"0")}`:""}
+function bniParseRoster(text:string){const rows=bniSpreadsheetRows(text),expiryAliases=["到期日","續約日","會籍到期","會員到期","expirationdate","expirydate","renewaldate"];let at=-1,idx:any;for(let i=0;i<rows.length;i++){const candidate={member:bniColumn(rows[i],bniAliases.member),surname:bniColumn(rows[i],bniAliases.surname),givenName:bniColumn(rows[i],bniAliases.givenName),expiry:bniColumn(rows[i],expiryAliases)};if(candidate.member>=0||(candidate.surname>=0&&candidate.givenName>=0)){at=i;idx=candidate;break}}if(at<0)throw new Error("無法辨識會員名冊欄位");const blocked=new Set(["會員姓名","分會網站管理員","發展協調人","會員委員會","會員委員會社區建設者","會員委員會品質保證","會員委員會會員參與","會員委員會會員關係"]);return rows.slice(at+1).map(row=>{const member=String(idx.member>=0?row[idx.member]||"":`${row[idx.surname]||""}${row[idx.givenName]||""}`).replace(/\s+/g," ").trim();return{member,expiryDate:idx.expiry>=0?bniParseDate(row[idx.expiry]):""}}).filter(item=>item.member&&!/合計|總計|total/i.test(item.member)&&!/^\d+會員$/.test(bniNormalize(item.member))&&!blocked.has(bniNormalize(item.member)))}
+function bniParseAttendance(text:string,endDate:Date){const rows=bniSpreadsheetRows(text);let headers:string[]=[],at=-1,dateStart=-1;for(let i=0;i<rows.length;i++){const first=rows[i].findIndex(v=>/^\d{1,2}\s*月\s*\d{1,2}$/.test(v)||/^\d{1,2}[\/-]\d{1,2}$/.test(v));if(first>=0){headers=rows[i];at=i;dateStart=first;break}}if(at<0)throw new Error("無法辨識 PALMS 報表日期欄");const records:Array<{member:string;date:string;code:string}>=[];for(const row of rows.slice(at+1)){const member=row.slice(0,dateStart).join("").replace(/\s+/g,"").trim();if(!member)continue;for(let col=dateStart;col<headers.length;col++){const code=(row[col]||"").trim().toUpperCase();if(!["P","A","L","M","S"].includes(code))continue;const parts=headers[col].match(/^(\d{1,2})\s*月\s*(\d{1,2})$/)||headers[col].match(/^(\d{1,2})[\/-](\d{1,2})$/);if(!parts)continue;const month=Number(parts[1]),day=Number(parts[2]),year=month>endDate.getMonth()+1?endDate.getFullYear()-1:endDate.getFullYear();records.push({member,date:`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`,code})}}return records}
+function bniFindId(source:unknown,key:string){const wanted=bniNormalize(key),seen=new Set<unknown>();const visit=(value:any):string=>{if(!value||typeof value!=="object"||seen.has(value))return"";seen.add(value);for(const [name,item] of Object.entries(value)){if(bniNormalize(name).includes(wanted)&&/\d{2,}/.test(String(item||"")))return String(item).match(/\d{2,}/)?.[0]||"";const nested=visit(item);if(nested)return nested}return""};return visit(source)}
 
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
@@ -115,6 +139,43 @@ const worker = {
         return apiJson({ok:true,acknowledgements,updatedAt});
       }
       return apiJson({error:"不支援的確認狀態操作"},405);
+    }
+
+    if(url.pathname==="/api/bni-sync/run"&&request.method==="POST"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以執行一鍵更新"},403);
+      if(!env.DB||!env.BNI_TOKEN_ENCRYPTION_KEY)return apiJson({error:"伺服器同步尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_run (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      const running=await env.DB.prepare(`SELECT state,updated_at AS updatedAt FROM bni_sync_run WHERE id=1`).first<{state:string;updatedAt:string}>();
+      if(running?.state==="running"&&Date.now()-new Date(running.updatedAt).getTime()<180000)return apiJson({error:"資料正在更新中，請稍候查看結果"},409);
+      const startedAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,'running',?) ON CONFLICT(id) DO UPDATE SET state='running',updated_at=excluded.updated_at`).bind(startedAt).run();
+      try{
+        const stored=await env.DB.prepare(`SELECT encrypted_session AS encryptedSession FROM bni_connect_session WHERE id=1`).first<{encryptedSession:string}>();
+        if(!stored?.encryptedSession)throw new Error("尚未建立 BNI Connect 伺服器連線");
+        const keyBytes=Uint8Array.from(atob(env.BNI_TOKEN_ENCRYPTION_KEY),char=>char.charCodeAt(0)),cryptoKey=await crypto.subtle.importKey("raw",keyBytes,{name:"AES-GCM"},false,["encrypt","decrypt"]),[ivText,cipherText]=stored.encryptedSession.split("."),iv=Uint8Array.from(atob(ivText),char=>char.charCodeAt(0)),cipher=Uint8Array.from(atob(cipherText),char=>char.charCodeAt(0)),plain=await crypto.subtle.decrypt({name:"AES-GCM",iv},cryptoKey,cipher),session=JSON.parse(new TextDecoder().decode(plain)) as {accessToken:string;refreshToken:string};
+        const makeHeaders=(token:string)=>({authorization:`Bearer ${token}`,accept:"application/json, text/plain, */*","content-type":"application/json",origin:"https://www.bniconnectglobal.com",referer:"https://www.bniconnectglobal.com/"});
+        let token=session.accessToken,headers=makeHeaders(token),profileResponse=await fetch("https://api.bniconnectglobal.com/core-api/profile",{headers});
+        if(profileResponse.status===401&&session.refreshToken){
+          let refreshed:any=null;
+          for(const body of [{refresh_token:session.refreshToken},{refreshToken:session.refreshToken}]){const response=await fetch("https://api.bniconnectglobal.com/auth-api/refresh-token",{method:"POST",headers:{accept:"application/json","content-type":"application/json",origin:"https://www.bniconnectglobal.com"},body:JSON.stringify(body)});if(response.ok){refreshed=await response.json();break}}
+          token=String(refreshed?.access_token||refreshed?.accessToken||"");if(!token)throw new Error("BNI 登入已過期，請重新連接一次");
+          session.accessToken=token;session.refreshToken=String(refreshed?.refresh_token||refreshed?.refreshToken||session.refreshToken);headers=makeHeaders(token);profileResponse=await fetch("https://api.bniconnectglobal.com/core-api/profile",{headers});
+          const nextIv=crypto.getRandomValues(new Uint8Array(12)),nextPlain=new TextEncoder().encode(JSON.stringify(session)),nextCipher=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv:nextIv},cryptoKey,nextPlain)),encrypted=`${btoa(String.fromCharCode(...nextIv))}.${btoa(String.fromCharCode(...nextCipher))}`;await env.DB.prepare(`UPDATE bni_connect_session SET encrypted_session=?,updated_at=? WHERE id=1`).bind(encrypted,new Date().toISOString()).run();
+        }
+        if(!profileResponse.ok)throw new Error(`BNI 拒絕伺服器讀取（${profileResponse.status}）`);
+        const [profile,homeResponse]=[await profileResponse.json() as Record<string,unknown>,await fetch("https://api.bniconnectglobal.com/member-api/v2/home",{headers})];if(!homeResponse.ok)throw new Error(`無法取得分會資料（${homeResponse.status}）`);const home=await homeResponse.json() as Record<string,unknown>;
+        const chapter=bniFindId({profile,home},"chapter"),region=bniFindId({profile,home},"region"),country=bniFindId({profile,home},"country");if(!chapter||!region||!country)throw new Error("無法取得分會報表識別資料");
+        const end=new Date(),start=new Date(end.getFullYear(),end.getMonth()-5,1),usDate=(date:Date)=>`${String(date.getMonth()+1).padStart(2,"0")}/${String(date.getDate()).padStart(2,"0")}/${date.getFullYear()}`;
+        const generate=async(menuName:string)=>{const params=new URLSearchParams({menuName,IdOrg:chapter,startDate:usDate(start),endDate:usDate(end),ReportType:"EXCEL",__heading_chapter:chapter,__heading_region:region,__heading_country:country,__orientation:"ltr",execution_type:"SHORT",ShowDetails:"false",__exports_details:"1"}),response=await fetch(`https://api.bniconnectglobal.com/reports-api/reports/v1/generate?${params}`,{headers});if(!response.ok)throw new Error(`BNI ${menuName.includes("attendance")?"PALMS":"會員"}報表讀取失敗（${response.status}）`);return response.text()};
+        const [rosterText,attendanceText,duesResult]=await Promise.all([generate("menu.reports.chapter.roster"),generate("menu.reports.chapter.palms.attendance"),generate("menu.reports.chapter.membership.dues").catch(()=>"")]);
+        const roster=bniParseRoster(rosterText);if(roster.length<10)throw new Error("會員名冊筆數異常，已停止更新以保護現有資料");
+        const members=Array.from(new Set(roster.map(item=>item.member.replace(/\s+/g,"")))),records=Array.from(new Map(bniParseAttendance(attendanceText,end).filter(item=>members.includes(item.member.replace(/\s+/g,""))).map(item=>[`${item.member.replace(/\s+/g,"")}|${item.date}`,item])).values());if(records.length<10)throw new Error("PALMS 筆數異常，已停止更新以保護現有資料");
+        const dues=duesResult?bniParseRoster(duesResult):[],expiry=new Map([...roster,...dues].filter(item=>item.expiryDate).map(item=>[item.member.replace(/\s+/g,""),item.expiryDate])),renewals=roster.map(item=>({member:item.member,expiryDate:expiry.get(item.member.replace(/\s+/g,""))||item.expiryDate})).filter(item=>item.expiryDate),now=new Date().toISOString();
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_state (id INTEGER PRIMARY KEY CHECK (id=1), records TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_roster_state (id INTEGER PRIMARY KEY CHECK (id=1), members TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`CREATE TABLE IF NOT EXISTS practice_state (id INTEGER PRIMARY KEY CHECK (id=1), renewals TEXT NOT NULL DEFAULT '[]', tasks TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+        const practice=await env.DB.prepare(`SELECT renewals FROM practice_state WHERE id=1`).first<{renewals:string}>(),current=JSON.parse(practice?.renewals||"[]") as Array<Record<string,unknown>>,byName=new Map(current.map(item=>[String(item.name||"").replace(/\s+/g,""),item]));for(const item of renewals){const key=item.member.replace(/\s+/g,""),existing=byName.get(key),daysLeft=Math.ceil((new Date(`${item.expiryDate}T00:00:00+08:00`).getTime()-Date.now())/86400000),fallbackId=Array.from(`${key}|${item.expiryDate}`).reduce((sum,char)=>(sum*31+char.charCodeAt(0))>>>0,7);byName.set(key,{id:Number(existing?.id)||fallbackId,name:item.member,expiryDate:item.expiryDate,daysLeft,status:existing?.status||(daysLeft<=14?"待繳費":"待訪談"),owner:existing?.owner||"",note:existing?.note||"",updatedAt:now})}
+        await env.DB.batch([env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(records),now),env.DB.prepare(`INSERT INTO member_roster_state (id,members,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET members=excluded.members,updated_at=excluded.updated_at`).bind(JSON.stringify(members),now),env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,?,'[]',?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals,updated_at=excluded.updated_at`).bind(JSON.stringify([...byName.values()]),now)]);
+        const latestDate=records.map(item=>item.date).sort().at(-1)||"",syncStatus={lastSyncAt:now,attendance:{updatedAt:now,count:records.length,latestDate},members:{updatedAt:now,count:members.length},renewals:{updatedAt:renewals.length?now:null,count:renewals.length},kpis:{updatedAt:null,count:0},failedMembers:0};await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_status (id INTEGER PRIMARY KEY CHECK (id=1), status TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`INSERT INTO bni_sync_status (id,status,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(JSON.stringify(syncStatus),now).run();await env.DB.prepare(`UPDATE bni_sync_run SET state='success',updated_at=? WHERE id=1`).bind(now).run();return apiJson({ok:true,memberCount:members.length,renewalCount:renewals.length,attendanceCount:records.length,latestDate,updatedAt:now});
+      }catch(error){const message=error instanceof Error?error.message:"一鍵更新失敗";await env.DB.prepare(`UPDATE bni_sync_run SET state='failed',updated_at=? WHERE id=1`).bind(new Date().toISOString()).run();return apiJson({error:message},502)}
     }
 
     if(url.pathname==="/api/bni-connect/session"){
