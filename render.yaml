@@ -4,7 +4,7 @@ services:
     runtime: docker
     rootDir: sync-service
     dockerfilePath: ./Dockerfile
-    plan: starter
+    plan: free
     autoDeploy: true
     healthCheckPath: /health
     envVars:
