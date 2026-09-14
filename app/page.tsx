@@ -88,6 +88,11 @@ type GroupRole="十長"|"委員"|"導師"|"小組長"|"組員";
 type GroupMember={name:string;role:GroupRole};
 type MemberGroup={id:number;name:string;members:GroupMember[]};
 type CareAssignment={member:string;groupId:number;committee:string;leader:string};
+const deriveCareAssignments=(groups:MemberGroup[]):CareAssignment[]=>groups.flatMap(group=>{
+  const committee=group.members.find(member=>member.role==="委員")?.name||"";
+  const leader=group.members.find(member=>member.role==="小組長")?.name||"";
+  return group.members.map(member=>({member:member.name,groupId:group.id,committee,leader}));
+});
 type MemberKpi={member:string;trainingPoints:number|null;visitorCount:number|null;oneToOneWeeklyAverage:number|null;referralWeeklyAverage:number|null;referralTotal?:number|null;dreamReferralAmount:number|null;updatedAt?:string};
 const qualityIssueOptions:{value:QualityCase["issue"];label:string}[]=[{value:"缺席",label:"缺席"},{value:"遲到",label:"遲到"},{value:"替代人",label:"替代人"},{value:"A信",label:"需要 A 信"},{value:"B信",label:"需要 B 信"},{value:"關懷",label:"需要組長關懷"}];
 const qualityIssueLabel=(issue:QualityCase["issue"])=>qualityIssueOptions.find(option=>option.value===issue)?.label||issue;
@@ -509,6 +514,7 @@ export default function Home() {
   useEffect(()=>{fetch("/api/admin-schedules").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.schedules)&&data.schedules.length)setDutySchedules(data.schedules)}).catch(()=>{})},[]);
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors);serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
+  useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="members"))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
   const openQualityCases=qualityCases.filter(item=>item.status!=="已結案"&&activeMemberNames.has(normalizeMemberName(item.member)));
@@ -638,7 +644,7 @@ export default function Home() {
   }
   async function persistMemberGroups(next:MemberGroup[]){
     setMemberGroups(next);
-    setCareAssignments(next.flatMap(group=>{const committee=group.members.find(member=>member.role==="委員")?.name||"",leader=group.members.find(member=>member.role==="小組長")?.name||"";return group.members.map(member=>({member:member.name,groupId:group.id,committee,leader}))}));
+    setCareAssignments(deriveCareAssignments(next));
     groupSavingRef.current=true;
     try{const response=await fetch("/api/member-groups",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({groups:next})});
     if(!response.ok)flash("分組儲存失敗，請稍後再試");else flash("分組已儲存")}finally{groupSavingRef.current=false}
@@ -1266,7 +1272,7 @@ export default function Home() {
                         <div className="meeting-quality">
                           <section className="meeting-quality-cases">
                             <header><b>本週警戒名單</b><span>{visibleAgendaAttendanceAlerts.length} 人次</span></header>
-                            {visibleAgendaAttendanceAlerts.length===0?<p>目前沒有新的 A 信、B 信或三次代理警戒</p>:visibleAgendaAttendanceAlerts.map((alert)=><article key={`${alert.member}-${alert.level}`}><div className="meeting-quality-head"><input type="checkbox" checked={false} onChange={()=>acknowledgeAttendanceAlert(alert)}/><div><b>{alert.member}</b><small>{alert.reason}・{alert.level}</small></div></div><div className="meeting-quality-route"><span>{careAssignment(alert.member)?`第 ${careAssignment(alert.member)?.groupId} 組｜委員：${careAssignment(alert.member)?.committee||"未設定"}｜小組長：${careAssignment(alert.member)?.leader||"未設定"}`:"尚未分組・待補負責人"}</span></div></article>)}
+                            {visibleAgendaAttendanceAlerts.length===0?<p>目前沒有新的 A 信、B 信或三次代理警戒</p>:visibleAgendaAttendanceAlerts.map((alert)=>{const assignment=careAssignment(alert.member),owner=suggestedAlertOwner(alert),ownerRole=alertIssue(alert)==="A信"||alertIssue(alert)==="B信"?"小組委員":"小組長";return <article key={`${alert.member}-${alert.level}`}><div className="meeting-quality-head"><input type="checkbox" checked={false} onChange={()=>acknowledgeAttendanceAlert(alert)}/><div><b>{alert.member}</b><small>{alert.reason}・{alert.level}</small></div></div><div className="meeting-quality-route"><span>{assignment?`第 ${assignment.groupId} 組｜委員：${assignment.committee||"未設定"}｜小組長：${assignment.leader||"未設定"}`:"尚未分組・待補負責人"}</span><strong>{owner?`建議負責：${owner}（${ownerRole}）`:`待設定${ownerRole}`}</strong></div></article>})}
                           </section>
                           <section className="meeting-quality-cases">
                             <header><b>A／B 信與未結案件</b><span>{openQualityCases.length} 件</span></header>
