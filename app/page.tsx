@@ -705,8 +705,11 @@ export default function Home() {
     flash("續約進度已更新");
   }
   function updateRenewal(id: number, changes: Partial<Renewal>) {
-    setRenewals(renewals.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+    setRenewals(current=>current.map((r) => (r.id === id ? { ...r, ...changes } : r)));
     patchRecord("renewal",id,changes);
+  }
+  function updateRenewalDraft(id:number,changes:Partial<Renewal>){
+    setRenewals(current=>current.map(item=>item.id===id?{...item,...changes}:item));
   }
   function restoreRenewal(id:number){setRenewalStatus(id,"待訪談");flash("會員已恢復續約追蹤")}
   function updateVisitor(id: number, changes: Partial<Visitor>) {
@@ -1403,9 +1406,8 @@ export default function Home() {
                                   : r.note
                               }
                               placeholder="記錄聯絡或訪談結果…"
-                              onChange={(e) =>
-                                updateRenewal(r.id, { note: e.target.value })
-                              }
+                              onChange={(e)=>updateRenewalDraft(r.id,{note:e.target.value})}
+                              onBlur={(e)=>patchRecord("renewal",r.id,{note:e.target.value})}
                             />
                           </label>
                         </article>
