@@ -143,6 +143,32 @@ const worker = {
       return apiJson({error:"不支援的確認狀態操作"},405);
     }
 
+    if(url.pathname==="/api/v1/bni-sync/job"){
+      const cors={"content-type":"application/json; charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","access-control-allow-headers":"authorization, content-type","access-control-allow-methods":"GET, POST, OPTIONS"};
+      const respond=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:cors});
+      if(request.method==="OPTIONS")return new Response(null,{status:204,headers:cors});
+      if(!env.DB)return respond({error:"資料庫尚未啟用"},503);
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(bearer))),b=>b.toString(16).padStart(2,"0")).join("");
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
+      const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>(),runnerAuthorized=Boolean(env.BNI_RUNNER_TOKEN&&bearer===env.BNI_RUNNER_TOKEN);
+      if(!runnerAuthorized&&(!bearer||!credential?.keyHash||digest!==credential.keyHash))return respond({error:"同步金鑰無效"},401);
+      const current=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+      if(request.method==="GET")return respond({job:current||{state:"idle"}});
+      if(request.method==="POST"){
+        const body=await request.json().catch(()=>({})) as Record<string,unknown>,action=String(body.action||"claim"),now=new Date().toISOString();
+        if(action==="claim"){
+          if(current?.state!=="pending")return respond({job:current||{state:"idle"}});
+          await env.DB.prepare(`UPDATE bni_sync_job SET state='running',started_at=?,message='' WHERE id=1 AND state='pending'`).bind(now).run();
+        }else if(action==="complete"||action==="failed"){
+          await env.DB.prepare(`UPDATE bni_sync_job SET state=?,completed_at=?,message=? WHERE id=1`).bind(action==="complete"?"success":"failed",now,String(body.message||"").slice(0,500)).run();
+        }else return respond({error:"不支援的工作狀態"},400);
+        const job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+        return respond({job});
+      }
+      return respond({error:"不支援的操作"},405);
+    }
+
     if(url.pathname==="/api/bni-sync/run"&&request.method==="POST"){
       const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
       if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以執行一鍵更新"},403);
@@ -151,6 +177,10 @@ const worker = {
       const running=await env.DB.prepare(`SELECT state,updated_at AS updatedAt FROM bni_sync_run WHERE id=1`).first<{state:string;updatedAt:string}>();
       if(running?.state==="running"&&Date.now()-new Date(running.updatedAt).getTime()<180000)return apiJson({error:"資料正在更新中，請稍候查看結果"},409);
       const startedAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,'running',?) ON CONFLICT(id) DO UPDATE SET state='running',updated_at=excluded.updated_at`).bind(startedAt).run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
+      await env.DB.prepare(`INSERT INTO bni_sync_job (id,state,requested_at,started_at,completed_at,message) VALUES (1,'pending',?,NULL,NULL,'') ON CONFLICT(id) DO UPDATE SET state='pending',requested_at=excluded.requested_at,started_at=NULL,completed_at=NULL,message=''`).bind(startedAt).run();
+      return apiJson({ok:true,queued:true,state:"pending",requestedAt:startedAt});
+      if(false){
       try{
         if(env.BNI_RUNNER_URL&&env.BNI_RUNNER_TOKEN){
           const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/sync`,{method:"POST",headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`,"content-type":"application/json"},body:JSON.stringify({siteOrigin:url.origin})}),result=await response.json() as Record<string,unknown>;
@@ -183,6 +213,7 @@ const worker = {
         await env.DB.batch([env.DB.prepare(`INSERT INTO attendance_state (id,records,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET records=excluded.records,updated_at=excluded.updated_at`).bind(JSON.stringify(records),now),env.DB.prepare(`INSERT INTO member_roster_state (id,members,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET members=excluded.members,updated_at=excluded.updated_at`).bind(JSON.stringify(members),now),env.DB.prepare(`INSERT INTO practice_state (id,renewals,tasks,updated_at) VALUES (1,?,'[]',?) ON CONFLICT(id) DO UPDATE SET renewals=excluded.renewals,updated_at=excluded.updated_at`).bind(JSON.stringify([...byName.values()]),now)]);
         const latestDate=records.map(item=>item.date).sort().at(-1)||"",syncStatus={lastSyncAt:now,attendance:{updatedAt:now,count:records.length,latestDate},members:{updatedAt:now,count:members.length},renewals:{updatedAt:renewals.length?now:null,count:renewals.length},kpis:{updatedAt:null,count:0},failedMembers:0};await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_status (id INTEGER PRIMARY KEY CHECK (id=1), status TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`).run();await env.DB.prepare(`INSERT INTO bni_sync_status (id,status,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(JSON.stringify(syncStatus),now).run();await env.DB.prepare(`UPDATE bni_sync_run SET state='success',updated_at=? WHERE id=1`).bind(now).run();return apiJson({ok:true,memberCount:members.length,renewalCount:renewals.length,attendanceCount:records.length,latestDate,updatedAt:now});
       }catch(error){const message=error instanceof Error?error.message:"一鍵更新失敗";await env.DB.prepare(`UPDATE bni_sync_run SET state='failed',updated_at=? WHERE id=1`).bind(new Date().toISOString()).run();return apiJson({error:message},502)}
+      }
     }
 
     if(url.pathname==="/api/bni-connect/session"){

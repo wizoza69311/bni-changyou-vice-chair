@@ -17,6 +17,11 @@ coverage/
 *.pfx
 secrets.*
 credentials.*
+storage_state.json
+**/storage_state.json
+帳號密碼設定.txt
+**/帳號密碼設定.txt
+local-sync-bridge/settings.json
 
 # Local databases and runtime state
 *.db
