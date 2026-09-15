@@ -228,9 +228,15 @@ async function sync() {
       start = new Date(end.getFullYear(), end.getMonth() - 5, 1),
       displayDate = (date) =>
         `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-    const startInput = page.locator("input[name='startDate']"),
-      endInput = page.locator("input[name='endDate']"),
-      goButton = page.getByRole("button", { name: "Go", exact: true });
+    const startInput = page
+        .locator("input[name='startDate'], input[id*='startDate']")
+        .first(),
+      endInput = page
+        .locator("input[name='endDate'], input[id*='endDate']")
+        .first(),
+      goButton = page
+        .locator("button#button, button:has-text('開始'), button:has-text('Go')")
+        .first();
     if (!(await startInput.count()) || !(await endInput.count()) || !(await goButton.count()))
       throw Error("BNI 報表頁結構已變更，找不到日期欄位或 Go 按鈕");
     await startInput.fill(displayDate(start));
