@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from datetime import date
@@ -51,11 +52,16 @@ def summary_payload(tool_path: str) -> dict:
     if not (tool / "palms_scraper" / "fetcher.py").exists():
         raise RuntimeError("找不到 BNI PALMS 查詢工具。")
     sys.path.insert(0, str(tool))
-    from palms_scraper.fetcher import fetch_report_html  # type: ignore
-    from palms_scraper.parser import parse_report  # type: ignore
+    previous_directory = Path.cwd()
+    os.chdir(tool)
+    try:
+        from palms_scraper.fetcher import fetch_report_html  # type: ignore
+        from palms_scraper.parser import parse_report  # type: ignore
 
-    start, end = month_window()
-    report = parse_report(fetch_report_html(start, end))
+        start, end = month_window()
+        report = parse_report(fetch_report_html(start, end))
+    finally:
+        os.chdir(previous_directory)
     kpis = []
     members = []
     for row in report.get("members", []):
