@@ -181,7 +181,11 @@ async function sync() {
       waitUntil: "networkidle",
       timeout: 90000,
     });
-    if (page.url().includes("/login")) {
+    await page.waitForTimeout(2000);
+    if (
+      page.url().includes("/login") ||
+      page.url().replace(/\/$/, "") === "https://bniconnectglobal.com"
+    ) {
       await page
         .locator("input[name='username']")
         .fill(process.env.BNI_USERNAME);
@@ -201,9 +205,19 @@ async function sync() {
         timeout: 90000,
       });
     }
-    const session = await page.evaluate(() =>
-      localStorage.getItem("bniconnect:portal:session"),
-    );
+    let session = "";
+    for (let attempt = 0; attempt < 5 && !session; attempt++) {
+      try {
+        session =
+          (await page.evaluate(() =>
+            localStorage.getItem("bniconnect:portal:session"),
+          )) || "";
+      } catch (error) {
+        if (!String(error).includes("Execution context was destroyed")) throw error;
+        await page.waitForLoadState("domcontentloaded", { timeout: 30000 });
+      }
+      if (!session) await page.waitForTimeout(1000);
+    }
     if (!session) throw Error("BNI 登入後未取得工作階段");
     const token = JSON.parse(session).access_token,
       headers = {
