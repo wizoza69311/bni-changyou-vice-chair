@@ -177,10 +177,13 @@ async function sync() {
     const context = await browser.newContext({ locale: "zh-TW" }),
       page = await context.newPage();
     console.log("Opening BNI chapter reports page");
-    await page.goto("https://www.bniconnectglobal.com/web/reports?tab=chapter", {
+    await page.goto(
+      "https://www.bniconnectglobal.com/web/secure/reportsHome#reportsactiontabcontentstructurechapter",
+      {
       waitUntil: "networkidle",
       timeout: 90000,
-    });
+      },
+    );
     await page.waitForTimeout(2000);
     if (
       page.url().includes("/login") ||
@@ -200,10 +203,10 @@ async function sync() {
         .catch(() => {
           throw Error("BNI 登入失敗；可能需要驗證碼或重新確認帳密");
         });
-      await page.goto("https://www.bniconnectglobal.com/web/reports?tab=chapter", {
-        waitUntil: "networkidle",
-        timeout: 90000,
-      });
+      await page.goto(
+        "https://www.bniconnectglobal.com/web/secure/reportsHome#reportsactiontabcontentstructurechapter",
+        { waitUntil: "networkidle", timeout: 90000 },
+      );
     }
     let session = "";
     for (let attempt = 0; attempt < 5 && !session; attempt++) {
