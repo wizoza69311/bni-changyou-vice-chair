@@ -39,6 +39,8 @@ site-package.tgz
 *.tgz
 
 # Logs, caches and editor files
+__pycache__/
+*.py[cod]
 *.log
 .eslintcache
 .DS_Store
