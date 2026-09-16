@@ -422,6 +422,13 @@ const worker = {
       return apiJson({assignments,updatedAt:current?.updatedAt||null});
     }
 
+    if(url.pathname==="/api/group-directory"&&request.method==="GET"){
+      if(!env.DB)return apiJson({groups:[],updatedAt:null});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_group_state (id INTEGER PRIMARY KEY CHECK (id=1), groups TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const current=await env.DB.prepare(`SELECT groups,updated_at AS updatedAt FROM member_group_state WHERE id=1`).first<{groups:string;updatedAt:string}>();
+      return apiJson({groups:JSON.parse(current?.groups||"[]"),updatedAt:current?.updatedAt||null});
+    }
+
     if(url.pathname==="/api/member-groups"){
       const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase();
       const adminEmail=(env.ADMIN_EMAIL||"").trim().toLowerCase();

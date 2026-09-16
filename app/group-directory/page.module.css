@@ -1,0 +1,181 @@
+.page {
+  min-height: 100vh;
+  background: #f5f3ee;
+  color: #1d2833;
+  padding: 36px clamp(18px, 4vw, 64px) 48px;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+}
+
+.header {
+  max-width: 1440px;
+  margin: 0 auto 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 3px solid #b51f2e;
+  padding-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 7px;
+  color: #a31827;
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: clamp(1.9rem, 3vw, 2.8rem);
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+}
+
+.meta {
+  margin: 10px 0 0;
+  color: #69737e;
+  font-size: 0.95rem;
+}
+
+.summary {
+  display: flex;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.summary span {
+  min-width: 84px;
+  padding: 11px 14px;
+  border: 1px solid #ded8ce;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+  color: #69737e;
+}
+
+.summary b {
+  display: block;
+  color: #a31827;
+  font-size: 1.35rem;
+}
+
+.grid {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid #ded8ce;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 7px 22px rgba(38, 34, 29, 0.06);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 18px;
+  background: #a31827;
+  color: #fff;
+}
+
+.cardHead h2 {
+  margin: 0;
+  font-size: 1.18rem;
+}
+
+.cardHead span {
+  font-size: 0.88rem;
+  opacity: 0.9;
+}
+
+.roles {
+  padding: 6px 16px 14px;
+}
+
+.roleRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eeeae3;
+}
+
+.roleRow:last-child {
+  border-bottom: 0;
+}
+
+.roleRow h3 {
+  margin: 2px 0 0;
+  color: #7c6755;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.names span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: #f4f1ec;
+  color: #26313c;
+  font-size: 0.94rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.notice {
+  max-width: 1440px;
+  margin: 0 auto 18px;
+  padding: 18px;
+  border: 1px solid #ded8ce;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.error {
+  color: #a31827;
+  border-color: #e8b8be;
+  background: #fff6f7;
+}
+
+.footer {
+  max-width: 1440px;
+  margin: 26px auto 0;
+  color: #7a8188;
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+@media (max-width: 1050px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+  .page { padding: 24px 14px 36px; }
+  .header { align-items: flex-start; flex-direction: column; }
+  .summary { width: 100%; }
+  .summary span { flex: 1; }
+  .grid { grid-template-columns: 1fr; }
+  .roleRow { grid-template-columns: 56px minmax(0, 1fr); }
+}
+
+@media print {
+  .page { background: #fff; padding: 0; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .card { box-shadow: none; break-inside: avoid; }
+}
