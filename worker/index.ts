@@ -153,6 +153,9 @@ const worker = {
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
       const credential=await env.DB.prepare(`SELECT key_hash AS keyHash FROM bni_sync_credential WHERE id=1`).first<{keyHash:string}>(),runnerAuthorized=Boolean(env.BNI_RUNNER_TOKEN&&bearer===env.BNI_RUNNER_TOKEN);
       if(!runnerAuthorized&&(!bearer||!credential?.keyHash||digest!==credential.keyHash))return respond({error:"同步金鑰無效"},401);
+      const heartbeatAt=new Date().toISOString();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_runner (id INTEGER PRIMARY KEY CHECK (id=1), last_seen_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`INSERT INTO bni_sync_runner (id,last_seen_at) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at`).bind(heartbeatAt).run();
       const current=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
       if(request.method==="GET")return respond({job:current||{state:"idle"}});
       if(request.method==="POST"){
@@ -162,11 +165,24 @@ const worker = {
           await env.DB.prepare(`UPDATE bni_sync_job SET state='running',started_at=?,message='' WHERE id=1 AND state='pending'`).bind(now).run();
         }else if(action==="complete"||action==="failed"){
           await env.DB.prepare(`UPDATE bni_sync_job SET state=?,completed_at=?,message=? WHERE id=1`).bind(action==="complete"?"success":"failed",now,String(body.message||"").slice(0,500)).run();
+          await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_run (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+          await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`).bind(action==="complete"?"success":"failed",now).run();
         }else return respond({error:"不支援的工作狀態"},400);
         const job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
         return respond({job});
       }
       return respond({error:"不支援的操作"},405);
+    }
+
+    if(url.pathname==="/api/bni-sync/health"&&request.method==="GET"){
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以查看同步工具狀態"},403);
+      if(!env.DB)return apiJson({online:false,lastSeenAt:null,job:{state:"idle"}});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_runner (id INTEGER PRIMARY KEY CHECK (id=1), last_seen_at TEXT NOT NULL)`).run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
+      const runner=await env.DB.prepare(`SELECT last_seen_at AS lastSeenAt FROM bni_sync_runner WHERE id=1`).first<{lastSeenAt:string}>(),job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+      const lastSeenAt=runner?.lastSeenAt||null,online=Boolean(lastSeenAt&&Date.now()-new Date(lastSeenAt).getTime()<=60000);
+      return apiJson({online,lastSeenAt,job:job||{state:"idle"}});
     }
 
     if(url.pathname==="/api/bni-sync/run"&&request.method==="POST"){
