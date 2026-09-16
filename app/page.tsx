@@ -360,7 +360,6 @@ const normalizeMemberName=(name:string)=>{
 const seedMemberGroups:MemberGroup[]=Array.from({length:12},(_,index)=>({id:index+1,name:`第 ${index+1} 組`,members:[]}));
 const nav: { id: View; label: string; icon: string }[] = [
   { id: "dashboard", label: "系統首頁", icon: "⌂" },
-  { id: "admin", label: "系統後臺", icon: "⚙" },
   { id: "members", label: "會員主檔", icon: "◉" },
   { id: "agenda", label: "本週議程", icon: "≡" },
   { id: "renewals", label: "續約追蹤", icon: "◷" },
@@ -370,6 +369,7 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: "schedules", label: "行政排班", icon: "▤" },
   { id: "quality", label: "出缺席管理", icon: "◇" },
   { id: "history", label: "會議紀錄儲存", icon: "▣" },
+  { id: "admin", label: "系統後臺", icon: "⚙" },
 ];
 function fmt(date: string) {
   return new Date(`${date}T00:00:00`).toLocaleDateString("zh-TW", {
