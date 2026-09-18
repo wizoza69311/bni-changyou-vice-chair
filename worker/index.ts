@@ -529,6 +529,19 @@ const worker = {
       }
       return apiJson({error:"出席資料只能由管理員同步"},405);
     }
+    if(url.pathname==="/api/attendance-conversions"){
+      if(!env.DB)return apiJson({error:"出席資料庫尚未啟用"},503);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_conversion_state (id INTEGER PRIMARY KEY CHECK (id=1), conversions TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
+      const row=await env.DB.prepare(`SELECT conversions,updated_at AS updatedAt FROM attendance_conversion_state WHERE id=1`).first<{conversions:string;updatedAt:string}>();
+      if(request.method==="GET")return apiJson({conversions:JSON.parse(row?.conversions||"[]"),updatedAt:row?.updatedAt||null});
+      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
+      if(!email||email!==admin)return apiJson({error:"只有系統擁有者可以設定遲到折算"},403);
+      const body=await request.json() as Record<string,unknown>,conversions=Array.isArray(body.conversions)?body.conversions:[];
+      const valid=conversions.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.convertedDate))&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.pairedLateDate))&&x.pairedLateDate<x.convertedDate);
+      const now=new Date().toISOString();
+      await env.DB.prepare(`INSERT INTO attendance_conversion_state (id,conversions,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET conversions=excluded.conversions,updated_at=excluded.updated_at`).bind(JSON.stringify(valid),now).run();
+      return apiJson({ok:true,conversions:valid,updatedAt:now});
+    }
 
     if (url.pathname === "/api/weekly-archives" || url.pathname.startsWith("/api/weekly-archives/")) {
       if (!env.DB) return apiJson({ error:"會議建檔資料庫尚未啟用" }, 503);
