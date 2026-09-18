@@ -226,41 +226,39 @@ async function sync() {
       headers = {
         Authorization: `Bearer ${token}`,
         Accept: "application/json, text/plain, */*",
+        Origin: "https://www.bniconnectglobal.com",
+        Referer: "https://www.bniconnectglobal.com/",
       };
     const end = new Date(),
       start = new Date(end.getFullYear(), end.getMonth() - 5, 1),
       displayDate = (date) =>
         `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-    const startInput = page
-        .locator("input[name='startDate'], input[id*='startDate']")
-        .first(),
-      endInput = page
-        .locator("input[name='endDate'], input[id*='endDate']")
-        .first(),
-      goButton = page
-        .locator("button#button, button:has-text('開始'), button:has-text('Go')")
-        .first();
-    if (!(await startInput.count()) || !(await endInput.count()) || !(await goButton.count()))
-      throw Error("BNI 報表頁結構已變更，找不到日期欄位或 Go 按鈕");
-    await startInput.fill(displayDate(start));
-    await endInput.fill(displayDate(end));
-    const htmlOption = page.locator("input[name='report-type'][value='HTML']");
-    if (await htmlOption.count()) await htmlOption.check();
-    const reportResponsePromise = page.waitForResponse(
-      (response) => response.url().includes("reports-api"),
-      { timeout: 90000 },
-    );
-    await goButton.click();
-    const reportResponse = await reportResponsePromise;
-    if (!reportResponse.ok())
-      throw Error(`BNI 報表頁測試失敗（${reportResponse.status()}）`);
-    const capturedUrl = new URL(reportResponse.url()),
-      capturedParams = capturedUrl.searchParams,
-      chapter = capturedParams.get("IdOrg") || capturedParams.get("__heading_chapter"),
-      region = capturedParams.get("__heading_region"),
-      country = capturedParams.get("__heading_country");
+    const [profileResponse, homeResponse] = await Promise.all([
+      context.request.get("https://api.bniconnectglobal.com/core-api/profile", { headers }),
+      context.request.get("https://api.bniconnectglobal.com/member-api/v2/home", { headers }),
+    ]);
+    if (!profileResponse.ok() || !homeResponse.ok())
+      throw Error("BNI 登入有效，但無法取得分會識別資料");
+    const profile = await profileResponse.json(),
+      home = await homeResponse.json(),
+      chapter = findId({ profile, home }, "chapter"),
+      region = findId({ profile, home }, "region"),
+      country = findId({ profile, home }, "country"),
+      capturedParams = new URLSearchParams({
+        IdOrg: chapter,
+        startDate: displayDate(start),
+        endDate: displayDate(end),
+        ReportType: "HTML",
+        __heading_chapter: chapter,
+        __orientation: "ltr",
+        execution_type: "SHORT",
+        ShowDetails: "false",
+        __exports_details: "1",
+      });
+    if (region) capturedParams.set("__heading_region", region);
+    if (country) capturedParams.set("__heading_country", country);
     if (!chapter) throw Error("BNI 報表頁未回傳分會識別資料");
-    console.log("Captured BNI report parameters from the authenticated page");
+    console.log("Resolved BNI report parameters from the authenticated session");
     const
       generate = async (menu) => {
         const q = new URLSearchParams(capturedParams);
