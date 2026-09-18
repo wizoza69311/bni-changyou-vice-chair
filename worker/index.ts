@@ -180,14 +180,27 @@ const worker = {
       if(!env.DB)return apiJson({online:false,lastSeenAt:null,job:{state:"idle"}});
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_runner (id INTEGER PRIMARY KEY CHECK (id=1), last_seen_at TEXT NOT NULL)`).run();
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
-      const runner=await env.DB.prepare(`SELECT last_seen_at AS lastSeenAt FROM bni_sync_runner WHERE id=1`).first<{lastSeenAt:string}>(),job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+      const runner=await env.DB.prepare(`SELECT last_seen_at AS lastSeenAt FROM bni_sync_runner WHERE id=1`).first<{lastSeenAt:string}>();let job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
       let lastSeenAt=runner?.lastSeenAt||null,online=Boolean(lastSeenAt&&Date.now()-new Date(lastSeenAt).getTime()<=60000),mode="local";
       if(env.BNI_RUNNER_URL&&env.BNI_RUNNER_TOKEN){
         mode="cloud";
         try{
-          const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/health`,{headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`}});
+          const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/status`,{headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`}});
           online=response.ok;
-          if(online){lastSeenAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO bni_sync_runner (id,last_seen_at) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at`).bind(lastSeenAt).run()}
+          if(online){
+            lastSeenAt=new Date().toISOString();
+            await env.DB.prepare(`INSERT INTO bni_sync_runner (id,last_seen_at) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at`).bind(lastSeenAt).run();
+            const status=await response.json() as Record<string,unknown>;
+            if(status.state==="success"||status.state==="failed"){
+              const result=(status.result||{}) as Record<string,unknown>,completedAt=String(status.completedAt||lastSeenAt),attendanceCount=Number(result.attendanceCount??result.count??0),message=status.state==="success"?`會員主檔 ${Number(result.memberCount||0)} 位、續約 ${Number(result.renewalCount||0)} 位、PALMS ${attendanceCount} 筆已更新`:String(status.error||"雲端同步失敗");
+              await env.DB.prepare(`INSERT INTO bni_sync_job (id,state,requested_at,started_at,completed_at,message) VALUES (1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,started_at=excluded.started_at,completed_at=excluded.completed_at,message=excluded.message`).bind(String(status.state),String(status.startedAt||completedAt),String(status.startedAt||completedAt),completedAt,message).run();
+              await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`).bind(String(status.state),completedAt).run();
+              job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+            }else if(status.state==="running"){
+              await env.DB.prepare(`UPDATE bni_sync_job SET state='running',started_at=COALESCE(started_at,?) WHERE id=1`).bind(String(status.startedAt||lastSeenAt)).run();
+              job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+            }
+          }
         }catch{online=false}
       }
       return apiJson({online,lastSeenAt,mode,job:job||{state:"idle"}});
@@ -203,13 +216,14 @@ const worker = {
       const startedAt=new Date().toISOString();await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,'running',?) ON CONFLICT(id) DO UPDATE SET state='running',updated_at=excluded.updated_at`).bind(startedAt).run();
       if(env.BNI_RUNNER_URL&&env.BNI_RUNNER_TOKEN){
         try{
-          const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/sync`,{method:"POST",headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`,"content-type":"application/json"},body:JSON.stringify({siteOrigin:url.origin})}),result=await response.json() as Record<string,unknown>;
-          if(!response.ok)throw new Error(String(result.error||`雲端同步服務失敗（${response.status}）`));
-          const completedAt=new Date().toISOString(),attendanceCount=Number(result.attendanceCount??result.count??0),message=`會員主檔 ${Number(result.memberCount||0)} 位、續約 ${Number(result.renewalCount||0)} 位、PALMS ${attendanceCount} 筆已更新`;
           await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
-          await env.DB.prepare(`INSERT INTO bni_sync_job (id,state,requested_at,started_at,completed_at,message) VALUES (1,'success',?,?,?,?) ON CONFLICT(id) DO UPDATE SET state='success',requested_at=excluded.requested_at,started_at=excluded.started_at,completed_at=excluded.completed_at,message=excluded.message`).bind(startedAt,startedAt,completedAt,message).run();
-          await env.DB.prepare(`UPDATE bni_sync_run SET state='success',updated_at=? WHERE id=1`).bind(completedAt).run();
-          return apiJson({...result,attendanceCount,updatedAt:String(result.updatedAt||completedAt)});
+          const response=await fetch(`${env.BNI_RUNNER_URL.replace(/\/$/,"")}/sync`,{method:"POST",headers:{authorization:`Bearer ${env.BNI_RUNNER_TOKEN}`,"content-type":"application/json"},body:JSON.stringify({siteOrigin:url.origin})}),raw=await response.text();
+          let result:Record<string,unknown>={};try{result=raw?JSON.parse(raw) as Record<string,unknown>:{}}catch{result={error:`雲端同步服務暫時無法連線（${response.status}）`}}
+          if(!response.ok)throw new Error(String(result.error||`雲端同步服務失敗（${response.status}）`));
+          const acceptedAt=new Date().toISOString();
+          await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
+          await env.DB.prepare(`INSERT INTO bni_sync_job (id,state,requested_at,started_at,completed_at,message) VALUES (1,'running',?,?,NULL,'') ON CONFLICT(id) DO UPDATE SET state='running',requested_at=excluded.requested_at,started_at=excluded.started_at,completed_at=NULL,message=''`).bind(startedAt,String(result.startedAt||acceptedAt)).run();
+          return apiJson({ok:true,queued:true,state:"running",requestedAt:startedAt});
         }catch(error){
           const message=error instanceof Error?error.message:"雲端一鍵更新失敗",failedAt=new Date().toISOString();
           await env.DB.prepare(`UPDATE bni_sync_run SET state='failed',updated_at=? WHERE id=1`).bind(failedAt).run();

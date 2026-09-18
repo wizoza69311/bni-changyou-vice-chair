@@ -341,10 +341,20 @@ async function sync() {
   }
 }
 let busy = false;
+let syncStatus = { state: "idle", startedAt: null, completedAt: null, result: null, error: "" };
 const server = http.createServer(async (req, res) => {
   res.setHeader("content-type", "application/json; charset=utf-8");
   if (req.url === "/health") {
-    res.end(JSON.stringify({ ok: true }));
+    res.end(JSON.stringify({ ok: true, ...syncStatus }));
+    return;
+  }
+  if (req.url === "/status") {
+    if (req.headers.authorization !== `Bearer ${process.env.BNI_RUNNER_TOKEN}`) {
+      res.statusCode = 401;
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    res.end(JSON.stringify(syncStatus));
     return;
   }
   if (req.url !== "/sync" || req.method !== "POST") {
@@ -359,12 +369,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (busy) {
-    res.statusCode = 409;
-    res.end(JSON.stringify({ error: "同步正在執行中" }));
+    res.statusCode = 202;
+    res.end(JSON.stringify({ ok: true, accepted: true, ...syncStatus }));
     return;
   }
   busy = true;
-  try {
+  const startedAt = new Date().toISOString();
+  syncStatus = { state: "running", startedAt, completedAt: null, result: null, error: "" };
+  res.statusCode = 202;
+  res.end(JSON.stringify({ ok: true, accepted: true, state: "running", startedAt }));
+  void (async () => {
+   try {
     console.log("BNI sync started");
     const result = await sync();
     console.log(
@@ -376,15 +391,15 @@ const server = http.createServer(async (req, res) => {
         latestDate: result.latestDate,
       }),
     );
-    res.end(JSON.stringify(result));
+    syncStatus = { state: "success", startedAt, completedAt: new Date().toISOString(), result, error: "" };
   } catch (error) {
     const message = error instanceof Error ? error.message : "同步失敗";
     console.error("BNI sync failed:", message);
-    res.statusCode = 502;
-    res.end(JSON.stringify({ error: message }));
+    syncStatus = { state: "failed", startedAt, completedAt: new Date().toISOString(), result: null, error: message };
   } finally {
     busy = false;
   }
+  })();
 });
 server.listen(Number(process.env.PORT || 10000), "0.0.0.0", () =>
   console.log("BNI sync service listening"),
