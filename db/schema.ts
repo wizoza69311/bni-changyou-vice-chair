@@ -71,3 +71,4 @@ export const memberKpiState = sqliteTable("member_kpi_state", {
 });
 
 export const attendanceAlertAckState=sqliteTable("attendance_alert_ack_state",{id:integer("id").primaryKey(),acknowledgements:text("acknowledgements").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
+export const letterNotificationState=sqliteTable("letter_notification_state",{id:integer("id").primaryKey(),notifications:text("notifications").notNull().default("[]"),updatedAt:text("updated_at").notNull()});

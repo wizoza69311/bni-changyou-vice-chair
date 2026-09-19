@@ -142,6 +142,19 @@ const worker = {
       }
       return apiJson({error:"不支援的確認狀態操作"},405);
     }
+    if(url.pathname==="/api/letter-notifications"){
+      if(!env.DB)return apiJson({error:"通知資料庫尚未啟用"},503);
+      const row=await env.DB.prepare(`SELECT notifications,updated_at AS updatedAt FROM letter_notification_state WHERE id=1`).first<{notifications:string;updatedAt:string}>();
+      if(request.method==="GET")return apiJson({notifications:JSON.parse(row?.notifications||"[]"),updatedAt:row?.updatedAt||null});
+      if(request.method==="POST"){
+        const body=await request.json() as Record<string,unknown>,notifications=Array.isArray(body.notifications)?body.notifications:[];
+        const valid=notifications.filter((item:any)=>item&&typeof item.key==="string"&&typeof item.notifiedAt==="string");
+        const now=new Date().toISOString();
+        await env.DB.prepare(`INSERT INTO letter_notification_state (id,notifications,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET notifications=excluded.notifications,updated_at=excluded.updated_at`).bind(JSON.stringify(valid),now).run();
+        return apiJson({ok:true,notifications:valid,updatedAt:now});
+      }
+      return apiJson({error:"不支援的通知紀錄操作"},405);
+    }
 
     if(url.pathname==="/api/v1/bni-sync/job"){
       const cors={"content-type":"application/json; charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","access-control-allow-headers":"authorization, content-type","access-control-allow-methods":"GET, POST, OPTIONS"};
