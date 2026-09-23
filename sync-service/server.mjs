@@ -81,6 +81,7 @@ function roster(text) {
   }
   if (at < 0) throw Error("無法辨識會員名冊");
   const blocked = new Set([
+    "提供",
     "會員姓名",
     "分會網站管理員",
     "發展協調人",

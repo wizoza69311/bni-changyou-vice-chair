@@ -540,6 +540,18 @@ export default function Home() {
   const assignedMemberNames=useMemo(()=>new Set(memberGroups.flatMap(group=>group.members.map(member=>member.name))),[memberGroups]);
   const unassignedMemberNames=useMemo(()=>[...new Set([...activeMemberNames,...extraGroupMemberNames])].filter(name=>!assignedMemberNames.has(name)).sort((a,b)=>a.localeCompare(b,"zh-Hant")),[assignedMemberNames,activeMemberNames]);
   const careAssignmentMap=useMemo(()=>new Map(careAssignments.map(item=>[normalizeMemberName(item.member),item])),[careAssignments]);
+  const renewalRouteMap=useMemo(()=>new Map(memberGroups.flatMap(group=>{
+    const committee=group.members.find(member=>member.role==="委員")?.name||"";
+    return group.members.map(member=>[normalizeMemberName(member.name),{groupId:group.id,committee,isCommittee:member.role==="委員"}] as const);
+  })),[memberGroups]);
+  const renewalInterviewRoute=(renewal:Renewal)=>{
+    const route=renewalRouteMap.get(normalizeMemberName(renewal.name));
+    if(!route)return{groupId:null,owner:committeeMembers.includes(renewal.owner)||renewal.owner==="副主席"?renewal.owner:"",label:"尚未完成分組"};
+    const automaticOwner=route.isCommittee?"副主席":route.committee;
+    const manuallyAssigned=committeeMembers.includes(renewal.owner)&&(renewal.owner!==route.committee||!route.isCommittee);
+    const owner=manuallyAssigned?renewal.owner:automaticOwner;
+    return{groupId:route.groupId,owner,label:route.isCommittee?`第 ${route.groupId} 組委員本人續約・由副主席親自訪談`:`第 ${route.groupId} 組・由當組委員 ${route.committee||"待設定"} 訪談`};
+  };
   const careOwnerNames=useMemo(()=>[...new Set([...committeeMembers,...careAssignments.flatMap(item=>[item.committee,item.leader]).filter(Boolean)])],[careAssignments]);
   const departedMembers=useMemo(()=>new Set(renewals.filter(item=>item.status==="已離會").map(item=>item.name.trim())),[renewals]);
   const attendanceSummary=useMemo(()=>{const now=new Date(),current=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`,rollingStart=new Date(now.getFullYear(),now.getMonth()-5,1);const startKey=`${rollingStart.getFullYear()}-${String(rollingStart.getMonth()+1).padStart(2,"0")}-01`,endKey=taipeiDateKey();const mapped=new Set(attendanceConversions.map(item=>`${normalizeMemberName(item.member)}|${item.convertedDate}`));const consumedLate=new Set(attendanceConversions.map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`));const members=new Map<string,{absent:number;substitute:number;late:number;currentAbsent:number;currentSubstitute:number;currentLate:number;details:AttendanceRecord[]}>();attendanceRecords.forEach(record=>{const normalized=normalizeMemberName(record.member);if(!activeMemberNames.has(normalized)||departedMembers.has(record.member.trim())||record.date<startKey||record.date>endKey)return;const row=members.get(record.member)||{absent:0,substitute:0,late:0,currentAbsent:0,currentSubstitute:0,currentLate:0,details:[]};if(record.code==="A")row.absent++;if(record.code==="S")row.substitute++;if(record.code==="L")row.late++;if(record.date.startsWith(current)){if(record.code==="A")row.currentAbsent++;if(record.code==="S")row.currentSubstitute++;if(record.code==="L")row.currentLate++}row.details.push(record);members.set(record.member,row)});members.forEach((row,member)=>{const remainingLate=row.details.filter(r=>r.code==="L"&&!consumedLate.has(`${normalizeMemberName(member)}|${r.date}`));row.absent+=Math.floor(remainingLate.length/2);const currentRemaining=remainingLate.filter(r=>r.date.startsWith(current));row.currentAbsent+=Math.floor(currentRemaining.length/2);void mapped});return {startKey,endKey,current,rows:[...members.entries()].sort((a,b)=>(b[1].absent+b[1].substitute)-(a[1].absent+a[1].substitute))}},[attendanceRecords,attendanceConversions,departedMembers,activeMemberNames]);
@@ -1155,11 +1167,7 @@ export default function Home() {
                                 <label>
                                   <span>訪談委員</span>
                                   <select
-                                    value={
-                                      committeeMembers.includes(renewal.owner)
-                                        ? renewal.owner
-                                        : ""
-                                    }
+                                    value={renewalInterviewRoute(renewal).owner}
                                     onChange={(e) =>
                                       updateRenewal(renewal.id, {
                                         owner: e.target.value,
@@ -1167,12 +1175,14 @@ export default function Home() {
                                     }
                                   >
                                     <option value="">未指派</option>
+                                    <option value="副主席">副主席（親自訪談）</option>
                                     {committeeMembers.map((member) => (
                                       <option key={member} value={member}>
                                         {member}
                                       </option>
                                     ))}
                                   </select>
+                                  <small className="renewal-auto-route">{renewalInterviewRoute(renewal).label}</small>
                                 </label>
                                 <label>
                                   <span>本週備註</span>
@@ -1407,22 +1417,20 @@ export default function Home() {
                           <label>
                             <span>訪談委員</span>
                             <select
-                              value={
-                                committeeMembers.includes(r.owner)
-                                  ? r.owner
-                                  : ""
-                              }
+                              value={renewalInterviewRoute(r).owner}
                               onChange={(e) =>
                                 updateRenewal(r.id, { owner: e.target.value })
                               }
                             >
                               <option value="">未指派</option>
+                              <option value="副主席">副主席（親自訪談）</option>
                               {committeeMembers.map((member) => (
                                 <option key={member} value={member}>
                                   {member}
                                 </option>
                               ))}
                             </select>
+                            <small className="renewal-auto-route">{renewalInterviewRoute(r).label}</small>
                           </label>
                           <label>
                             <span>續約進度</span>

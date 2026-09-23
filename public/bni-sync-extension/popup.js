@@ -542,6 +542,7 @@ function parseRosterReport(text) {
   }
   if (headerIndex < 0) throw new Error("無法辨識會員名冊欄位");
   const nonMemberLabels = new Set([
+    "提供",
     "會員姓名",
     "分會網站管理員",
     "發展協調人",
