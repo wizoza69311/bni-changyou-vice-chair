@@ -534,7 +534,7 @@ export default function Home() {
   useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="admin"))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
-  const committeeAgendaTasks=openTasks.filter(task=>task.source!=="meeting").sort((a,b)=>b.id-a.id);
+  const committeeAgendaTasks=openTasks.filter(task=>task.source!=="meeting"||task.dueDate!==archiveDate).sort((a,b)=>b.id-a.id);
   const meetingDecisionTasks=tasks.filter(task=>task.source==="meeting"&&task.dueDate===archiveDate).sort((a,b)=>a.id-b.id);
   const openQualityCases=qualityCases.filter(item=>item.status!=="已結案"&&activeMemberNames.has(normalizeMemberName(item.member)));
   const visibleQualityCases=qualityCases.filter(item=>activeMemberNames.has(normalizeMemberName(item.member)));
