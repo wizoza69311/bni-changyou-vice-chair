@@ -534,6 +534,7 @@ export default function Home() {
   useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
   useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="admin"))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
+  const committeeAgendaTasks=openTasks.filter(task=>task.source!=="meeting").sort((a,b)=>b.id-a.id);
   const meetingDecisionTasks=tasks.filter(task=>task.source==="meeting"&&task.dueDate===archiveDate).sort((a,b)=>a.id-b.id);
   const openQualityCases=qualityCases.filter(item=>item.status!=="已結案"&&activeMemberNames.has(normalizeMemberName(item.member)));
   const visibleQualityCases=qualityCases.filter(item=>activeMemberNames.has(normalizeMemberName(item.member)));
@@ -638,11 +639,15 @@ export default function Home() {
         items: visibleAgendaAttendanceAlerts.length ? visibleAgendaAttendanceAlerts.map(alert=>`${alert.member}｜${alert.reason}｜${alert.level}`) : ["目前沒有新的 A 信、B 信或三次代理警戒"],
       },
       {
+        title: "委員待辦",
+        items: committeeAgendaTasks.map(task=>`${task.owner}｜${task.title}｜${fmt(task.dueDate)} 前`),
+      },
+      {
         title: "決議與分工",
         items: meetingDecisionTasks.map(task=>`${task.owner}｜${task.title}`),
       },
     ],
-    [trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts, meetingDecisionTasks],
+    [trackedRenewals, activeVisitors, visibleAgendaAttendanceAlerts, committeeAgendaTasks, meetingDecisionTasks],
   );
   const activeAgenda = reopenedAgenda || agenda;
   function flash(message: string) {
@@ -1337,6 +1342,10 @@ export default function Home() {
                               {(item.issue==="A信"||item.issue==="B信")&&<details className="meeting-letter"><summary>查看 {item.issue} 範本</summary><pre>{letterText(item.issue,item.member)}</pre><button type="button" onClick={()=>copyLetter(item.issue as "A信"|"B信",item.member)}>複製信件</button></details>}
                             </article>)}
                           </section>
+                        </div>
+                      ) : g.title === "委員待辦"&&!reopenedAgenda ? (
+                        <div className="task-list meeting-committee-tasks">
+                          {committeeAgendaTasks.length===0?<p>目前沒有未完成的委員待辦</p>:committeeAgendaTasks.map(task=><label key={task.id}><input type="checkbox" checked={false} onChange={()=>toggleTask(task.id)}/><div><b>{task.title}</b><small>負責委員：{task.owner} · {fmt(task.dueDate)} 前</small></div></label>)}
                         </div>
                       ) : g.title === "決議與分工"&&!reopenedAgenda ? (
                         <div className="task-list meeting-decisions">
