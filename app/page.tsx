@@ -555,6 +555,13 @@ export default function Home() {
   };
   const careOwnerNames=useMemo(()=>[...new Set([...committeeMembers,...careAssignments.flatMap(item=>[item.committee,item.leader]).filter(Boolean)])],[careAssignments]);
   const departedMembers=useMemo(()=>new Set(renewals.filter(item=>item.status==="已離會").map(item=>item.name.trim())),[renewals]);
+  const membershipCounts = useMemo(() => {
+    const departed = new Set([...departedMembers].map(normalizeMemberName));
+    const roster = [...new Set([...activeMemberNames].map(normalizeMemberName))].filter(name => !departed.has(name));
+    const assigned = new Set([...assignedMemberNames].map(normalizeMemberName));
+    const unassigned = roster.filter(name => !assigned.has(name));
+    return { total: roster.length, unassigned, actual: roster.length - unassigned.length };
+  }, [activeMemberNames, assignedMemberNames, departedMembers]);
   const attendanceSummary=useMemo(()=>{const now=new Date(),current=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`,rollingStart=new Date(now.getFullYear(),now.getMonth()-5,1);const startKey=`${rollingStart.getFullYear()}-${String(rollingStart.getMonth()+1).padStart(2,"0")}-01`,endKey=taipeiDateKey();const mapped=new Set(attendanceConversions.map(item=>`${normalizeMemberName(item.member)}|${item.convertedDate}`));const consumedLate=new Set(attendanceConversions.map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`));const members=new Map<string,{absent:number;substitute:number;late:number;currentAbsent:number;currentSubstitute:number;currentLate:number;details:AttendanceRecord[]}>();attendanceRecords.forEach(record=>{const normalized=normalizeMemberName(record.member);if(!activeMemberNames.has(normalized)||departedMembers.has(record.member.trim())||record.date<startKey||record.date>endKey)return;const row=members.get(record.member)||{absent:0,substitute:0,late:0,currentAbsent:0,currentSubstitute:0,currentLate:0,details:[]};if(record.code==="A")row.absent++;if(record.code==="S")row.substitute++;if(record.code==="L")row.late++;if(record.date.startsWith(current)){if(record.code==="A")row.currentAbsent++;if(record.code==="S")row.currentSubstitute++;if(record.code==="L")row.currentLate++}row.details.push(record);members.set(record.member,row)});members.forEach((row,member)=>{const remainingLate=row.details.filter(r=>r.code==="L"&&!consumedLate.has(`${normalizeMemberName(member)}|${r.date}`));row.absent+=Math.floor(remainingLate.length/2);const currentRemaining=remainingLate.filter(r=>r.date.startsWith(current));row.currentAbsent+=Math.floor(currentRemaining.length/2);void mapped});return {startKey,endKey,current,rows:[...members.entries()].sort((a,b)=>(b[1].absent+b[1].substitute)-(a[1].absent+a[1].substitute))}},[attendanceRecords,attendanceConversions,departedMembers,activeMemberNames]);
   const attendanceMatrix=useMemo(()=>{const allowed=attendanceRecords.filter(r=>activeMemberNames.has(normalizeMemberName(r.member))&&!departedMembers.has(r.member.trim())&&r.date>=attendanceSummary.startKey&&r.date<=attendanceSummary.endKey);const dates=[...new Set(allowed.map(r=>r.date))].sort();const members=[...new Set(allowed.map(r=>r.member))].sort((a,b)=>a.localeCompare(b,"zh-Hant"));const lookup=new Map(allowed.map(r=>[`${r.member}|${r.date}`,r.code]));const mappedConversions=new Map(attendanceConversions.map(item=>[`${normalizeMemberName(item.member)}|${item.convertedDate}`,item]));const consumed=new Set(attendanceConversions.map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`));const convertedLateKeys=new Set<string>();members.forEach(member=>{allowed.filter(record=>record.member===member&&record.code==="L"&&!consumed.has(`${normalizeMemberName(member)}|${record.date}`)).sort((a,b)=>a.date.localeCompare(b.date)).forEach((record,index)=>{if((index+1)%2===0)convertedLateKeys.add(`${record.member}|${record.date}`)})});const months=[...new Set(dates.map(date=>date.slice(0,7)))].map(month=>({month,dates:dates.filter(date=>date.startsWith(month))}));return{dates,members,lookup,convertedLateKeys,mappedConversions,months}},[attendanceRecords,attendanceConversions,attendanceSummary,departedMembers,activeMemberNames]);
   const attendanceHealth=useMemo(()=>{const latestDate=attendanceMatrix.dates.at(-1)||"",today=new Date(`${taipeiDateKey()}T12:00:00`),day=today.getDay(),daysSinceThursday=(day+3)%7,expected=new Date(today);expected.setDate(today.getDate()-daysSinceThursday);const expectedDate=`${expected.getFullYear()}-${String(expected.getMonth()+1).padStart(2,"0")}-${String(expected.getDate()).padStart(2,"0")}`,active=[...activeMemberNames].filter(name=>!departedMembers.has(name)),latestMembers=new Set(attendanceRecords.filter(record=>record.date===latestDate&&activeMemberNames.has(normalizeMemberName(record.member))).map(record=>normalizeMemberName(record.member))),missingMembers=active.filter(name=>!latestMembers.has(name)),coverage=active.length?Math.round(latestMembers.size/active.length*100):0,status=!latestDate?"empty":latestDate<expectedDate?"waiting":missingMembers.length?"incomplete":"ready";return{latestDate,expectedDate,activeCount:active.length,latestCount:latestMembers.size,missingMembers,coverage,status}},[attendanceMatrix.dates,attendanceRecords,departedMembers,activeMemberNames]);
@@ -609,6 +616,16 @@ export default function Home() {
   const trackedRenewals = renewals.filter((renewal) =>
     trackedMonthKeys.includes(renewal.expiryDate.slice(0, 7)) && !terminalRenewalStatuses.includes(renewal.status),
   );
+  const homeRenewals = trackedRenewals
+    .map((renewal) => ({
+      ...renewal,
+      daysLeft: Math.round((Date.parse(`${renewal.expiryDate}T00:00:00+08:00`) - Date.parse(`${todayKey}T00:00:00+08:00`)) / 86400000),
+    }))
+    .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+  const homeDueCount = (days: number) => renewals.filter((renewal) => {
+    const remaining = Math.round((Date.parse(`${renewal.expiryDate}T00:00:00+08:00`) - Date.parse(`${todayKey}T00:00:00+08:00`)) / 86400000);
+    return !terminalRenewalStatuses.includes(renewal.status) && remaining >= 0 && remaining <= days;
+  }).length;
   const renewalGroups = useMemo(
     () =>
       monthlyMembers
@@ -963,17 +980,17 @@ export default function Home() {
               <section className="stats">
                 <article className="red">
                   <small>14 天內到期</small>
-                  <strong>2</strong>
+                  <strong>{homeDueCount(14)}</strong>
                   <p>需立即確認付款</p>
                 </article>
                 <article className="amber">
                   <small>60 天內到期</small>
-                  <strong>8</strong>
-                  <p>含 10 月到期 6 人</p>
+                  <strong>{homeDueCount(60)}</strong>
+                  <p>依目前續約紀錄統計</p>
                 </article>
                 <article>
                   <small>90 天內到期</small>
-                  <strong>15</strong>
+                  <strong>{homeDueCount(90)}</strong>
                   <p>已進入續約觀察期</p>
                 </article>
                 <article>
@@ -996,7 +1013,7 @@ export default function Home() {
                     </button>
                   </div>
                   <div className="renewal-list">
-                    {renewals.map((r) => (
+                    {homeRenewals.map((r) => (
                       <article key={r.id}>
                         <i className={urgency(r.daysLeft)} />
                         <div>
@@ -1005,7 +1022,7 @@ export default function Home() {
                         </div>
                         <time>
                           {fmt(r.expiryDate)}
-                          <small>剩 {r.daysLeft} 天</small>
+                          <small>{r.daysLeft < 0 ? `已逾期 ${-r.daysLeft} 天` : r.daysLeft === 0 ? "今天到期" : `剩 ${r.daysLeft} 天`}</small>
                         </time>
                         <select
                           value={r.status}
@@ -1019,6 +1036,9 @@ export default function Home() {
                         </select>
                       </article>
                     ))}
+                    {homeRenewals.length === 0 && (
+                      <p>目前沒有需要追蹤的續約會員</p>
+                    )}
                   </div>
                 </section>
                 <section className="panel">
@@ -1062,6 +1082,16 @@ export default function Home() {
           {view === "admin" && adminStatus?.isOwner && (
             <section className="admin-backend-page">
               <div className="renewal-summary"><div><span>ADMIN</span><h3>系統後臺</h3><p>僅限系統擁有者使用；集中管理 BNI Connect 資料更新與同步工具設定</p></div><strong>權限限定<small>管理員專區</small></strong></div>
+              <section className="connect-sync-card" aria-label="會員人數監控">
+                <header><h2>會員人數監控</h2><span>實際人數＝帳上人數－未分組人數</span></header>
+                <div>
+                  <article><small>帳上人數</small><b>{connectSyncStatus ? membershipCounts.total : "—"}</b><span>目前在籍會員，排除已離會</span></article>
+                  <article><small>未分組人數</small><b>{connectSyncStatus ? membershipCounts.unassigned.length : "—"}</b><span>在籍但尚未安排小組</span></article>
+                  <article><small>實際人數</small><b>{connectSyncStatus ? membershipCounts.actual : "—"}</b><span>在籍且已安排小組</span></article>
+                </div>
+                {connectSyncStatus && membershipCounts.unassigned.length > 0 && <details className="connect-sync-check"><summary>查看未分組名單</summary><p>{membershipCounts.unassigned.join("、")}</p></details>}
+                {!connectSyncStatus && <p>等待會員同步資料</p>}
+              </section>
               <section className={`panel sync-tool-health ${syncToolHealth?.online?"online":"offline"}`}><div className="sync-health-main"><span aria-hidden="true"/><div><small>本機同步工具</small><h3>{syncToolHealth===null?"正在偵測…":syncToolHealth.online?"在線，可以正常更新":"離線，暫時無法更新"}</h3><p>{syncToolHealth?.lastSeenAt?`最後心跳 ${syncDateTime(syncToolHealth.lastSeenAt)}`:"尚未收到工具心跳"}</p></div></div><div className="sync-job-state"><small>更新工作</small><b>{{pending:"等待工具接收",running:"正在更新",success:"上次更新成功",failed:"上次更新失敗",idle:"尚無工作"}[syncToolHealth?.job.state||"idle"]||syncToolHealth?.job.state}</b>{syncToolHealth?.job.message&&<p>{syncToolHealth.job.message}</p>}</div></section>
               <section className={`connect-sync-card ${connectSyncHealth}`}><header><div><small>BNI CONNECT 資料更新</small><h2>{connectSyncHealth==="ready"?"資料已更新且檢查完成":connectSyncHealth==="stale"?attendanceHealth.status==="waiting"?"等待最新例會資料":"超過七天未更新":connectSyncHealth==="error"?"資料已更新，但仍有缺漏待核對":"尚無同步紀錄"}</h2></div><time>{connectSyncStatus?`上次成功更新 ${syncDateTime(connectSyncStatus.lastSyncAt)}`:"尚未完成同步"}</time></header><div><article><small>出缺席</small><b>{connectSyncStatus?.attendance.latestDate?`更新至 ${fmt(connectSyncStatus.attendance.latestDate)}`:"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.attendance.count} 筆 · 最新週 ${attendanceHealth.latestCount}/${attendanceHealth.activeCount} 位`:"—"}</span></article><article><small>續約追蹤</small><b>{connectSyncStatus?.renewals.updatedAt?syncDateTime(connectSyncStatus.renewals.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.renewals.count} 位會員`:"—"}</span></article><article><small>會員主檔</small><b>{connectSyncStatus?.members.updatedAt?syncDateTime(connectSyncStatus.members.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.members.count} 位在籍會員`:"—"}</span></article></div><button type="button" className="server-sync-button" disabled={serverSyncing||!syncToolHealth?.online||["pending","running"].includes(syncToolHealth?.job.state||"")} onClick={runServerBniSync}>{serverSyncing||syncToolHealth?.job.state==="running"?"正在更新資料…":syncToolHealth?.job.state==="pending"?"等待同步工具…":syncToolHealth===null?"正在偵測工具…":!syncToolHealth.online?"同步工具離線":"一鍵更新全部資料"}</button>{attendanceHealth.status==="incomplete"&&<details className="connect-sync-check"><summary>查看 {attendanceHealth.missingMembers.length} 位缺漏會員</summary><p>{attendanceHealth.missingMembers.join("、")}</p></details>}{attendanceHealth.status==="waiting"&&<p className="connect-sync-check-note">BNI Connect 尚未提供 {fmt(attendanceHealth.expectedDate)} 的完整資料，系統不會把空白誤算成缺席。</p>}</section>
               <section className="panel bni-connect-setup server-sync-panel"><div><div><b>本機同步工具設定</b><small>第一次連接或更換電腦時才需要設定</small></div><p>同步工具會更新在籍會員、續約到期日、滾動六個月 PALMS 與會員 KPI；報表不完整時不會覆蓋正確資料。</p><details className="connect-sync-check"><summary>產生或更換同步金鑰</summary><button type="button" onClick={createBniSyncPair}>產生新的同步金鑰</button>{bniSyncKey&&<label>同步金鑰<input value={bniSyncKey} readOnly onFocus={event=>event.currentTarget.select()}/></label>}<small>建立新金鑰後，舊金鑰會立即失效；請貼到本機同步工具的設定檔。</small></details></div></section>
