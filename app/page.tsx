@@ -394,12 +394,9 @@ function trackingMonthKeys(now = new Date()) {
     parts.map((part) => [part.type, part.value]),
   );
   const year = Number(value.year),
-    month = Number(value.month),
-    day = Number(value.day);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const startOffset = day >= daysInMonth - 7 ? 1 : 0;
-  return Array.from({ length: 3 }, (_, index) => {
-    const date = new Date(year, month - 1 + startOffset + index, 1);
+    month = Number(value.month);
+  return Array.from({ length: 5 }, (_, index) => {
+    const date = new Date(year, month - 1 + index, 1);
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   });
 }
@@ -1417,8 +1414,8 @@ export default function Home() {
               <div className="renewal-summary">
                 <div>
                   <span>03</span>
-                  <h3>未來三個月到期會員</h3>
-                  <p>每月最後一週自動往後更新三個月；已排除離開或放棄會員</p>
+                  <h3>未來五個月到期會員</h3>
+                  <p>固定顯示當月起五個月；已排除離開或放棄會員</p>
                 </div>
                 <strong>
                   {trackedRenewals.length}
