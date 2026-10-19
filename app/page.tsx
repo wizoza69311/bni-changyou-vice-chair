@@ -354,8 +354,9 @@ const seedDutySchedules:AdminDutySchedule[]=[
   {date:"2026-10-29",policy:"林佩佩",whiteboard1:"楊嘉慧",whiteboard2:"游姿菱",referralReport:"康清智",committeeRecord:"田慶堂",host:"張博凱"},
 ];
 // Synced from BNI Connect's current chapter roster report on 2026-08-30.
-const seedActiveMemberNames=new Set(["王世品","賴丰培","蔡伊鎔","林佩佩","楊佳昇","陳依凡","侯冠瑋","盧冠臻","戴劭哲","黃勇嘉","張博凱","余博軒","曹原彰","黃同慶","楊和宥","林品彤","楊嘉慧","許國祥","李坊祥","鍾坤宏","葉奕廷","蘇姮勻","陳姵文","游姿菱","馮威憲","張婉靖","廖婕詠","周子嵐","莊子樂","王孟哲","呂孟翰","林宏一","林宗翰","林定豪","陳宜信","謝宥騏","林家蔚","劉宸緯","熊庭逸","潘建勳","陳建安","黃建華","林思裴","李恩誠","曾惠君","廖愷伶","丁慶儒","田慶堂","王懿德","鍾承翰","洪敏智","林文裕","雷文鳳","吳旌緯","蔡昕宏","陳春長","林昱璋","李曉玫","周曜贊","吳書林","陳朝銘","江柏陞","周榆璇","陳沛慈","康清智","彭澤偉","呂炘豪","翁煜宸","郭玉琴","黃瑀珍","蔡瑋倫","陳睿民","潘祥鈞","廖筱蘭","曾紹恩","張綺耘","劉美葳","洪翊嘉","連育正","陳芷綺","黃莞芹","葉蕥霈","陳薏如","梁虔駖","林詠淇","黃鈺淳","劉雍致","周順智","林駿維","黃麗娟","黃麟翔"]);
-const extraGroupMemberNames=["謝沂庭","鄭閔中"];
+const seedActiveMemberNames=new Set(["王世品","賴丰培","蔡伊鎔","林佩佩","楊佳昇","陳依凡","侯冠瑋","盧冠臻","戴劭哲","黃勇嘉","張博凱","余博軒","曹原彰","黃同慶","楊和宥","林品彤","楊嘉慧","許國祥","李坊祥","鍾坤宏","葉奕廷","蘇姮勻","陳姵文","游姿菱","馮威憲","張婉靖","廖婕詠","周子嵐","莊子樂","王孟哲","呂孟翰","林宏一","林宗翰","林定豪","陳宜信","謝宥騏","林家蔚","劉宸緯","熊庭逸","潘建勳","陳建安","黃建華","林思裴","李恩誠","曾惠君","廖愷伶","丁慶儒","田慶堂","王懿德","鍾承翰","洪敏智","林文裕","雷文鳳","吳旌緯","蔡昕宏","陳春長","林昱璋","李曉玫","周曜贊","吳書林","陳朝銘","江柏陞","周榆璇","陳沛慈","康清智","彭澤偉","呂炘豪","翁煜宸","郭玉琴","黃瑀珍","蔡瑋倫","陳睿民","潘祥鈞","廖筱蘭","曾紹恩","張綺耘","劉美葳","洪翊嘉","連育正","陳芷綺","黃莞芹","葉蕥霈","陳薏如","梁虔駖","林詠淇","黃鈺淳","劉雍致","周順智","林駿維","黃麗娟","黃麟翔","賴伸泰"]);
+const extraGroupMemberNames=["謝沂庭","鄭閔中","賴伸泰"];
+const manuallyAddedMemberNames=["賴伸泰"];
 const normalizeMemberName=(name:string)=>{
   const compact=name.replace(/\s+/g,"");
   return compact.startsWith("游姿菱")?"游姿菱":compact;
@@ -526,7 +527,7 @@ export default function Home() {
     fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{});
     fetch("/api/member-care-owners").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.assignments))setCareAssignments(data.assignments)}).catch(()=>{});
     fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
-    fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set(data.members.map((name:string)=>normalizeMemberName(name))))}).catch(()=>{});
+    fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set([...data.members.map((name:string)=>normalizeMemberName(name)),...manuallyAddedMemberNames]))}).catch(()=>{});
     fetch("/api/attendance-alert-acks").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.acknowledgements))setAcknowledgedAttendanceAlerts(data.acknowledgements)}).catch(()=>{});
     fetch("/api/letter-notifications").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.notifications))setLetterNotifications(data.notifications)}).catch(()=>{});
   }, []);
