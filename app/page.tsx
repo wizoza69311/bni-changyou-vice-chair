@@ -464,6 +464,7 @@ export default function Home() {
   const [visitorRelayDraft,setVisitorRelayDraft]=useState("");
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
+  const [showPendingInterviews,setShowPendingInterviews]=useState(false);
   const [visitorTrackingFilter,setVisitorTrackingFilter]=useState<VisitorTrackingFilter>("全部");
   const [lastSyncedAt,setLastSyncedAt]=useState("");
   const [connectSyncStatus,setConnectSyncStatus]=useState<ConnectSyncStatus|null>(null);
@@ -504,6 +505,7 @@ export default function Home() {
               name: cleanVisitorName(visitor.name),
               stage: visitor.stage === "預計出席" || visitor.stage === "已出席" || visitor.stage === "未出席" ? (visitor.interest === "不追蹤" ? "不追蹤" : "待確認") : visitor.stage || (visitor.interest === "不追蹤" ? "不追蹤" : "待確認"),
               visitDate: visitor.visitDate || taipeiDateKey(),
+              owner: visitor.owner || visitor.receptionOwner || "",
               receptionOwner: visitor.receptionOwner || "",
               followUpDate: visitor.followUpDate || "",
               logs: visitor.logs || [],
@@ -616,7 +618,8 @@ export default function Home() {
   const retainedVisitors=useMemo(()=>visitors.filter(visitor=>visitor.visitDate!==visitorRelayDate&&((['保留追蹤','考慮加入','申請中'] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||'未聯絡')||(['已簽單','訪談中','待投票','待繳費','持續追蹤'] as VisitorStage[]).includes(visitor.stage||'待確認'))).sort((a,b)=>visitorLastActivity(b).localeCompare(visitorLastActivity(a))),[visitors,visitorRelayDate,todayKey]);
   const filteredRetainedVisitors=useMemo(()=>retainedVisitors.filter(visitor=>visitorTrackingFilter==="全部"||visitorTrackingFilter==="未指派"&&!visitor.owner||visitorTrackingFilter==="待聯絡"&&(!visitor.interviewStatus||visitor.interviewStatus==="未聯絡")||visitorTrackingFilter==="已預約"&&visitor.interviewStatus==="已預約"||visitorTrackingFilter==="考慮加入"&&visitor.interviewStatus==="考慮加入"||visitorTrackingFilter==="申請中"&&visitor.interviewStatus==="申請中"),[retainedVisitors,visitorTrackingFilter]);
   const visitorHistoryGroups=useMemo(()=>{const retainedIds=new Set(retainedVisitors.map(visitor=>visitor.id));return Object.entries(visitors.filter(visitor=>visitor.visitDate!==visitorRelayDate&&!retainedIds.has(visitor.id)).reduce<Record<string,Visitor[]>>((groups,visitor)=>{const key=visitor.visitDate||"日期待補";(groups[key]||=[]).push(visitor);return groups},{})).sort(([a],[b])=>a==="日期待補"?1:b==="日期待補"?-1:b.localeCompare(a))},[visitors,visitorRelayDate,retainedVisitors]);
-  const visitorAttention=useMemo(()=>{const tracked=visitors.filter(visitor=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會");return{unassigned:tracked.filter(visitor=>!visitor.owner).length,pendingInterview:tracked.filter(visitor=>visitor.owner&&!(["已訪談","保留追蹤","考慮加入","申請中","不追蹤","已入會"] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||"未聯絡")).length,overdue:tracked.filter(visitor=>Boolean(visitorOverdue(visitor))).length}},[visitors,todayKey]);
+  const pendingInterviewVisitors=useMemo(()=>visitors.filter(visitor=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&visitor.owner&&!(["已訪談","保留追蹤","考慮加入","申請中","不追蹤","已入會"] as VisitorInterviewStatus[]).includes(visitor.interviewStatus||"未聯絡")),[visitors]);
+  const visitorAttention=useMemo(()=>{const tracked=visitors.filter(visitor=>visitor.stage!=="不追蹤"&&visitor.stage!=="已入會");return{unassigned:tracked.filter(visitor=>!visitor.owner).length,pendingInterview:pendingInterviewVisitors.length,overdue:tracked.filter(visitor=>Boolean(visitorOverdue(visitor))).length}},[visitors,todayKey,pendingInterviewVisitors]);
   function visitorOverdue(visitor:Visitor){if(!visitor.visitDate)return "";const days=Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitor.visitDate}T00:00:00`).getTime())/86400000);if(visitor.stage==="已簽單"&&days>3)return "訪談逾期";if(visitor.stage==="訪談中"&&days>4)return "投票逾期";if(visitor.stage==="待投票"&&days>7)return "通知逾期";if(visitor.stage==="待繳費"&&days>14)return "付款逾期";return ""}
   const trackedRenewals = renewals.filter((renewal) =>
     trackedMonthKeys.includes(renewal.expiryDate.slice(0, 7)) && !terminalRenewalStatuses.includes(renewal.status),
@@ -774,6 +777,7 @@ export default function Home() {
   }
   function restoreRenewal(id:number){setRenewalStatus(id,"待訪談");flash("會員已恢復續約追蹤")}
   function updateVisitor(id: number, changes: Partial<Visitor>) {
+    if (changes.owner !== undefined) changes = {...changes, receptionOwner: changes.owner};
     const currentVisitor=visitors.find(visitor=>visitor.id===id);
     const next = visitors.map((visitor) =>
       visitor.id === id ? { ...visitor, ...changes } : visitor,
@@ -1306,21 +1310,7 @@ export default function Home() {
                                   </select>
                                 </label>
                                 <label>
-                                  <span>接待委員</span>
-                                  <select
-                                    value={visitor.receptionOwner||""}
-                                    onChange={(e) =>
-                                      updateVisitor(visitor.id, {
-                                        receptionOwner:e.target.value,
-                                      })
-                                    }
-                                  >
-                                    <option value="">未指派</option>
-                                    {committeeMembers.map((member)=><option key={member}>{member}</option>)}
-                                  </select>
-                                </label>
-                                <label>
-                                  <span>締結委員</span>
+                                  <span>接待／締結委員</span>
                                   <select
                                     value={visitor.owner}
                                     onChange={(e) =>
@@ -1515,7 +1505,8 @@ export default function Home() {
           {view === "visitors" && (
             <section className="visitor-overview">
               <div className="renewal-summary"><div><span>04</span><h3>來賓追蹤</h3><p>本週名單、跨週追蹤與歷史紀錄分開整理</p></div><strong>{retainedVisitors.length}<small>持續追蹤</small></strong></div>
-              <section className="visitor-attention-summary" aria-label="來賓待處理摘要"><article><small>尚未指派</small><b>{visitorAttention.unassigned}</b><span>由副主席手動選擇締結委員</span></article><article><small>等待訪談回報</small><b>{visitorAttention.pendingInterview}</b><span>已指派但尚未完成訪談</span></article><article className={visitorAttention.overdue?"warning":""}><small>流程逾期</small><b>{visitorAttention.overdue}</b><span>需要在本週會議確認</span></article></section>
+              <section className="visitor-attention-summary" aria-label="來賓待處理摘要"><article><small>尚未指派</small><b>{visitorAttention.unassigned}</b><span>由副主席手動選擇締結委員</span></article><button type="button" className="visitor-attention-toggle" aria-expanded={showPendingInterviews} aria-controls="pending-interview-list" onClick={()=>setShowPendingInterviews(value=>!value)}><small>等待訪談回報</small><b>{visitorAttention.pendingInterview}</b><span>{showPendingInterviews?"收合名單 ↑":"點開查看來賓與負責委員 →"}</span></button><article className={visitorAttention.overdue?"warning":""}><small>流程逾期</small><b>{visitorAttention.overdue}</b><span>需要在本週會議確認</span></article></section>
+              {showPendingInterviews&&<section id="pending-interview-list" className="visitor-date-group"><header><div><b>等待訪談回報名單</b><small>包含本週與過往尚未完成訪談的來賓</small></div><span>{pendingInterviewVisitors.length} 位</span></header>{pendingInterviewVisitors.length?<section className="visitor-manage-list">{pendingInterviewVisitors.map(visitor=><div key={visitor.id}><p className="visitor-pending-date">來賓日期：{visitor.visitDate?fmt(visitor.visitDate):"待補"} · 負責委員：{visitor.owner}</p>{visitorTrackingCard(visitor)}</div>)}</section>:<p className="visitor-pipeline-empty">目前沒有等待訪談回報的來賓。</p>}</section>}
               {visitorAddForm()}
               <section className="visitor-date-group visitor-current-week"><header><div><b>本週新來賓</b><small>{fmt(visitorRelayDate)} 例會名單</small></div><span>{currentWeekVisitors.length} 位來賓</span></header>{currentWeekVisitors.length?<section className="visitor-manage-list">{currentWeekVisitors.map(visitorTrackingCard)}</section>:<p className="visitor-pipeline-empty">本週尚未匯入來賓，可從本週議程貼上接龍名單。</p>}</section>
               <section className="visitor-tracking-board"><header><div><b>跨週持續追蹤</b><small>只保留需要繼續聯絡、考慮加入或申請中的來賓</small></div><span>{retainedVisitors.length} 位</span></header><nav className="visitor-filter-bar" aria-label="持續追蹤篩選">{(["全部","未指派","待聯絡","已預約","考慮加入","申請中"] as VisitorTrackingFilter[]).map(filter=><button type="button" key={filter} className={visitorTrackingFilter===filter?"active":""} onClick={()=>setVisitorTrackingFilter(filter)}>{filter}</button>)}</nav>{filteredRetainedVisitors.length?<section className="visitor-manage-list">{filteredRetainedVisitors.map(visitor=><div className="visitor-retained-item" key={visitor.id}><div className="visitor-last-touch">最後更新 {fmt(visitorLastActivity(visitor))}<span>{visitorInactiveDays(visitor)} 天前</span></div>{visitorTrackingCard(visitor)}</div>)}</section>:<p className="visitor-pipeline-empty">這個分類目前沒有需要追蹤的來賓。</p>}</section>
