@@ -545,8 +545,9 @@ export default function Home() {
   const meetingDecisionTasks=tasks.filter(task=>task.source==="meeting"&&task.dueDate===archiveDate).sort((a,b)=>a.id-b.id);
   const openQualityCases=qualityCases.filter(item=>item.status!=="已結案"&&activeMemberNames.has(normalizeMemberName(item.member)));
   const visibleQualityCases=qualityCases.filter(item=>activeMemberNames.has(normalizeMemberName(item.member)));
+  const departedMembers=useMemo(()=>new Set(renewals.filter(item=>item.status==="已離會").map(item=>item.name.trim())),[renewals]);
   const assignedMemberNames=useMemo(()=>new Set(memberGroups.flatMap(group=>group.members.map(member=>member.name))),[memberGroups]);
-  const unassignedMemberNames=useMemo(()=>[...new Set([...activeMemberNames,...extraGroupMemberNames])].filter(name=>!assignedMemberNames.has(name)).sort((a,b)=>a.localeCompare(b,"zh-Hant")),[assignedMemberNames,activeMemberNames]);
+  const unassignedMemberNames=useMemo(()=>{const departed=new Set([...departedMembers].map(normalizeMemberName));return [...new Set([...activeMemberNames,...extraGroupMemberNames])].filter(name=>!assignedMemberNames.has(name)&&!departed.has(normalizeMemberName(name))).sort((a,b)=>a.localeCompare(b,"zh-Hant"))},[assignedMemberNames,activeMemberNames,departedMembers]);
   const careAssignmentMap=useMemo(()=>new Map(careAssignments.map(item=>[normalizeMemberName(item.member),item])),[careAssignments]);
   const renewalRouteMap=useMemo(()=>new Map(memberGroups.flatMap(group=>{
     const committee=group.members.find(member=>member.role==="委員")?.name||"";
@@ -561,7 +562,6 @@ export default function Home() {
     return{groupId:route.groupId,owner,label:route.isCommittee?`第 ${route.groupId} 組委員本人續約・由副主席親自訪談`:`第 ${route.groupId} 組・由當組委員 ${route.committee||"待設定"} 訪談`};
   };
   const careOwnerNames=useMemo(()=>[...new Set([...committeeMembers,...careAssignments.flatMap(item=>[item.committee,item.leader]).filter(Boolean)])],[careAssignments]);
-  const departedMembers=useMemo(()=>new Set(renewals.filter(item=>item.status==="已離會").map(item=>item.name.trim())),[renewals]);
   const membershipCounts = useMemo(() => {
     const departed = new Set([...departedMembers].map(normalizeMemberName));
     const roster = [...new Set([...activeMemberNames].map(normalizeMemberName))].filter(name => !departed.has(name));
