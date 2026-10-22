@@ -170,6 +170,76 @@ function findId(source, key) {
 }
 const us = (d) =>
   `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+function recentMeetingStart(end) {
+  const date = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 42);
+  while (date.getDay() !== 4) date.setDate(date.getDate() - 1);
+  return date;
+}
+async function completedChapterPalms(page, chapter, start) {
+  await page.goto(
+    `https://www.bniconnectglobal.com/web/secure/operationsChapterMeetingReportPalms?chapterId=${encodeURIComponent(chapter)}`,
+    { waitUntil: "domcontentloaded", timeout: 90000 },
+  );
+  const dateInput = page.locator("#fromDate");
+  await dateInput.waitFor({ state: "visible", timeout: 30000 });
+  await dateInput.click();
+  const calendar = page.locator("#ui-datepicker-div");
+  await calendar.locator(".ui-datepicker-year").selectOption(String(start.getFullYear()));
+  await calendar.locator(".ui-datepicker-month").selectOption(String(start.getMonth()));
+  await calendar.getByRole("link", { name: String(start.getDate()), exact: true }).click();
+  await page.locator("#Search").click();
+  await page.waitForFunction(
+    () => [...document.querySelectorAll("#datalist tbody tr")].some((row) => row.querySelectorAll("td").length >= 5),
+    null,
+    { timeout: 30000 },
+  );
+  const pageSize = page.locator("#datalist_length select");
+  if (await pageSize.count()) await pageSize.selectOption("100");
+  const rows = await page.locator("#datalist tbody tr").evaluateAll((elements) =>
+    elements.map((row) => {
+      const cells = [...row.querySelectorAll("td")];
+      return {
+        date: cells[0]?.textContent?.trim() || "",
+        status: cells[2]?.textContent?.trim() || "",
+        href: cells[2]?.querySelector("a")?.getAttribute("href") || "",
+      };
+    }),
+  );
+  const meetings = rows
+    .filter((row) => /^(完成|completed)$/i.test(row.status) && /^operationsChapterViewPalms\?/.test(row.href))
+    .map((row) => ({ date: dateValue(row.date), href: row.href }))
+    .filter((row) => row.date && row.date >= dateValue(start.toISOString().slice(0, 10)));
+  if (!meetings.length) throw Error("找不到最近已完成的分會 PALMS；本次未覆寫出缺席資料");
+  return meetings.sort((a, b) => a.date.localeCompare(b.date));
+}
+async function chapterPalmsAttendance(page, meeting, chapter, rosterMembers) {
+  const url = new URL(meeting.href, "https://www.bniconnectglobal.com/web/secure/");
+  if (url.origin !== "https://www.bniconnectglobal.com" ||
+      url.pathname !== "/web/secure/operationsChapterViewPalms" ||
+      url.searchParams.get("chapterId") !== chapter) {
+    throw Error("分會 PALMS 明細連結異常，已停止更新");
+  }
+  await page.goto(url.href, { waitUntil: "domcontentloaded", timeout: 90000 });
+  await page.waitForFunction(() => document.querySelectorAll("#datalist tbody tr").length >= 10, null, { timeout: 30000 });
+  const pageSize = page.locator("#datalist_length select");
+  if (await pageSize.count()) await pageSize.selectOption("100");
+  const rows = await page.locator("#datalist tbody tr").evaluateAll((elements) =>
+    elements.map((row) => [...row.querySelectorAll("td")].slice(0, 3).map((cell) => cell.textContent?.trim() || "")),
+  );
+  const records = rows
+    .map(([surname, given, code]) => {
+      const name = normalize(`${surname}${given}`);
+      const member = rosterMembers.get(name) || [...rosterMembers.entries()]
+        .filter(([key]) => name.startsWith(key))
+        .sort((a, b) => b[0].length - a[0].length)[0]?.[1] || "";
+      return { member, date: meeting.date, code: code?.toUpperCase() || "" };
+    })
+    .filter((row) => row.member && ["P", "A", "L", "M", "S"].includes(row.code));
+  if (records.length < Math.ceil(rosterMembers.size * 0.8)) {
+    throw Error(`${meeting.date} 分會 PALMS 明細人數異常，已停止更新`);
+  }
+  return records;
+}
 async function sync() {
   for (const key of required)
     if (!process.env[key]) throw Error(`同步服務缺少 ${key}`);
@@ -293,13 +363,28 @@ async function sync() {
     const members = [
         ...new Set(rosterRows.map((i) => i.member.replace(/\s+/g, ""))),
       ],
-      records = [
-        ...new Map(
-          attendance(at, end)
-            .filter((i) => members.includes(i.member.replace(/\s+/g, "")))
-            .map((i) => [`${normalize(i.member)}|${i.date}`, i]),
-        ).values(),
-      ];
+      rosterMembers = new Map(members.map((member) => [normalize(member), member])),
+      byMemberAndDate = new Map(
+        attendance(at, end)
+          .map((record) => ({ ...record, member: rosterMembers.get(normalize(record.member)) || "" }))
+          .filter((record) => record.member)
+          .map((record) => [`${normalize(record.member)}|${record.date}`, record]),
+      );
+    // The aggregate attendance export can lag behind a completed meeting. Reconcile
+    // the recent completed chapter PALMS reports before replacing site data.
+    const completedMeetings = await completedChapterPalms(page, chapter, recentMeetingStart(end));
+    for (const meeting of completedMeetings) {
+      const directRecords = await chapterPalmsAttendance(page, meeting, chapter, rosterMembers);
+      for (const record of directRecords) {
+        byMemberAndDate.set(`${normalize(record.member)}|${record.date}`, record);
+      }
+    }
+    const records = [...byMemberAndDate.values()],
+      latestCompletedDate = completedMeetings.at(-1)?.date || "",
+      latestRecordDate = records.map((record) => record.date).sort().at(-1) || "";
+    if (latestRecordDate < latestCompletedDate) {
+      throw Error(`分會 PALMS 已完成至 ${latestCompletedDate}，但同步資料只到 ${latestRecordDate || "無資料"}；本次未覆寫出缺席資料`);
+    }
     if (records.length < 10) throw Error("PALMS 筆數異常，已停止更新");
     const dues = dt ? roster(dt) : [],
       expiry = new Map(
@@ -329,11 +414,8 @@ async function sync() {
     return {
       ok: true,
       ...result,
-      latestDate:
-        records
-          .map((i) => i.date)
-          .sort()
-          .at(-1) || "",
+      latestDate: latestRecordDate,
+      completedMeetingCount: completedMeetings.length,
     };
   } finally {
     await browser.close();
