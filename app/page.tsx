@@ -526,7 +526,7 @@ export default function Home() {
     fetch("/api/quality-cases").then(r=>r.ok?r.json():null).then(data=>setQualityCases(data?.cases||[])).catch(()=>{});
     fetch("/api/attendance-records").then(r=>r.ok?r.json():null).then(data=>{setAttendanceRecords(data?.records||[]);setAttendanceUpdatedAt(data?.updatedAt||"")}).catch(()=>{});
     fetch("/api/attendance-conversions").then(r=>r.ok?r.json():null).then(data=>setAttendanceConversions(data?.conversions||[])).catch(()=>{});
-    fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{});
+    fetch("/api/group-directory").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{});
     fetch("/api/member-care-owners").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.assignments))setCareAssignments(data.assignments)}).catch(()=>{});
     fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
     fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10)setActiveMemberNames(new Set([...data.members.map((name:string)=>normalizeMemberName(name)),...manuallyAddedMemberNames]))}).catch(()=>{});
@@ -1108,7 +1108,7 @@ export default function Home() {
           )}
           {view === "members" && (
             <section className="member-master-page">
-              <div className="renewal-summary"><div><span>01</span><h3>會員主檔</h3><p>以查看當天往前六個月整合 PALMS、分組、續約與關懷狀態</p></div><strong>{memberProfiles.length}<small>在籍會員</small></strong></div>
+              <div className="renewal-summary"><div><span>01</span><h3>會員主檔</h3><p>所有使用者可檢視 PALMS、分組、續約與關懷狀態；只有管理員可維護 KPI</p></div><strong>{memberProfiles.length}<small>在籍會員</small></strong></div>
               <div className="member-master-layout">
                 <aside className="panel member-directory">
                   <header><div><b>會員名單</b><small>{memberWindow.start}～{memberWindow.end}</small></div><span>{filteredMemberProfiles.length}</span></header>
@@ -1727,7 +1727,7 @@ export default function Home() {
         </div>
         {notice && <div className="toast">✓　{notice}</div>}
       </main>
-      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isOwner?<><p>你已經以系統擁有者身分登入，系統後臺、分組管理與會員主檔均已解鎖。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用系統擁有者的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用擁有者帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
+      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isOwner?<><p>你已經以系統擁有者身分登入，系統後臺與分組管理已解鎖；會員主檔所有使用者均可檢視。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用系統擁有者的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用擁有者帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
     </div>
   );
 }

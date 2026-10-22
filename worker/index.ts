@@ -104,7 +104,7 @@ const worker = {
 
     if(url.pathname==="/api/member-kpis"){
       const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以查看或維護 KPI"},403);
+      if(request.method!=="GET"&&(!email||!admin||email!==admin))return apiJson({error:"只有系統擁有者可以維護 KPI"},403);
       if(!env.DB)return apiJson({error:"KPI 資料庫尚未啟用"},503);
       const selectSql=`SELECT member, training_points AS trainingPoints, visitor_count AS visitorCount, one_to_one_weekly_average AS oneToOneWeeklyAverage, referral_weekly_average AS referralWeeklyAverage, referral_total AS referralTotal, dream_referral_amount AS dreamReferralAmount, updated_at AS updatedAt FROM member_kpi_state`;
       if(request.method==="GET"){
