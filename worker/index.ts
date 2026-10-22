@@ -212,6 +212,11 @@ const worker = {
             }else if(status.state==="running"){
               await env.DB.prepare(`UPDATE bni_sync_job SET state='running',started_at=COALESCE(started_at,?) WHERE id=1`).bind(String(status.startedAt||lastSeenAt)).run();
               job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
+            }else if(status.state==="idle"&&job?.state==="running"&&Date.now()-new Date(String(job.startedAt||job.requestedAt||lastSeenAt)).getTime()>30000){
+              const message="雲端同步服務已重新啟動；上次工作中斷，請重新執行更新";
+              await env.DB.prepare(`UPDATE bni_sync_job SET state='failed',completed_at=?,message=? WHERE id=1`).bind(lastSeenAt,message).run();
+              await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,'failed',?) ON CONFLICT(id) DO UPDATE SET state='failed',updated_at=excluded.updated_at`).bind(lastSeenAt).run();
+              job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
             }
           }
         }catch{online=false}
