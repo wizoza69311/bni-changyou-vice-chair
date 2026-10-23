@@ -72,3 +72,19 @@ export const memberKpiState = sqliteTable("member_kpi_state", {
 
 export const attendanceAlertAckState=sqliteTable("attendance_alert_ack_state",{id:integer("id").primaryKey(),acknowledgements:text("acknowledgements").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
 export const letterNotificationState=sqliteTable("letter_notification_state",{id:integer("id").primaryKey(),notifications:text("notifications").notNull().default("[]"),updatedAt:text("updated_at").notNull()});
+
+export const weeklyPalmsReports = sqliteTable("weekly_palms_reports", {
+  meetingDate: text("meeting_date").primaryKey(),
+  summary: text("summary").notNull(),
+  audit: text("audit").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const weeklyPalmsReviews = sqliteTable("weekly_palms_reviews", {
+  key: text("key").primaryKey(),
+  meetingDate: text("meeting_date").notNull(),
+  transactionId: text("transaction_id").notNull(),
+  checked: integer("checked", { mode: "boolean" }).notNull().default(false),
+  note: text("note").notNull().default(""),
+  updatedAt: text("updated_at").notNull(),
+});

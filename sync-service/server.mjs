@@ -1,5 +1,6 @@
 import http from "node:http";
 import { chromium } from "playwright";
+import { parseChapterAudit, parseChapterSummary } from "./palms-report.mjs";
 
 const required = [
   "BNI_USERNAME",
@@ -223,8 +224,9 @@ async function chapterPalmsAttendance(page, meeting, chapter, rosterMembers) {
   await page.waitForFunction(() => document.querySelectorAll("#datalist tbody tr").length >= 10, null, { timeout: 30000 });
   const pageSize = page.locator("#datalist_length select");
   if (await pageSize.count()) await pageSize.selectOption("100");
+  await page.waitForFunction((minimum) => document.querySelectorAll("#datalist tbody tr").length >= minimum, Math.ceil(rosterMembers.size * 0.8), { timeout: 30000 });
   const rows = await page.locator("#datalist tbody tr").evaluateAll((elements) =>
-    elements.map((row) => [...row.querySelectorAll("td")].slice(0, 3).map((cell) => cell.textContent?.trim() || "")),
+    elements.map((row) => [...row.querySelectorAll("td")].map((cell) => cell.textContent?.trim() || "")),
   );
   const records = rows
     .map(([surname, given, code]) => {
@@ -238,7 +240,33 @@ async function chapterPalmsAttendance(page, meeting, chapter, rosterMembers) {
   if (records.length < Math.ceil(rosterMembers.size * 0.8)) {
     throw Error(`${meeting.date} 分會 PALMS 明細人數異常，已停止更新`);
   }
-  return records;
+  let report;
+  try {
+    report = parseChapterSummary(meeting.date, rows, rosterMembers);
+  } catch (error) {
+    console.warn(`Weekly summary unavailable for ${meeting.date}:`, error instanceof Error ? error.message : String(error));
+    return { records, report: null };
+  }
+  try {
+    await page.locator('a[href^="operationsChapterSlipsAuditReport?"]').click();
+    const auditFrame = page.frameLocator("#reportsIFrame");
+    await auditFrame.getByText("交易總額", { exact: true }).waitFor({ state: "visible", timeout: 60000 });
+    const auditRows = await auditFrame.locator("table").evaluateAll((tables) => {
+      const table = tables.find((item) => {
+        const first = item.querySelector("tr");
+        const cells = [...(first?.querySelectorAll("th,td") || [])].map((cell) => cell.textContent?.trim() || "");
+        return cells[0] === "自" && cells[1] === "至" && cells[2] === "事件類型";
+      });
+      return table ? [...table.querySelectorAll("tr")].slice(1).map((row) =>
+        [...row.querySelectorAll("td")].map((cell) => cell.textContent?.trim() || ""),
+      ) : [];
+    });
+    report.audit = parseChapterAudit(auditRows, report.totals.transactionValue);
+  } catch (error) {
+    console.warn(`Audit report unavailable for ${meeting.date}:`, error instanceof Error ? error.message : String(error));
+    report.audit = { status: "unavailable", total: null, ownTotal: null, otherChapterTotal: null, transactionCount: 0, ownTransactions: [] };
+  }
+  return { records, report };
 }
 async function sync() {
   for (const key of required)
@@ -373,8 +401,10 @@ async function sync() {
     // The aggregate attendance export can lag behind a completed meeting. Reconcile
     // the recent completed chapter PALMS reports before replacing site data.
     const completedMeetings = await completedChapterPalms(page, chapter, recentMeetingStart(end));
+    const weeklyReports = [];
     for (const meeting of completedMeetings) {
-      const directRecords = await chapterPalmsAttendance(page, meeting, chapter, rosterMembers);
+      const { records: directRecords, report } = await chapterPalmsAttendance(page, meeting, chapter, rosterMembers);
+      if (report) weeklyReports.push(report);
       for (const record of directRecords) {
         byMemberAndDate.set(`${normalize(record.member)}|${record.date}`, record);
       }
@@ -405,7 +435,7 @@ async function sync() {
             Authorization: `Bearer ${process.env.BNI_RUNNER_TOKEN}`,
             "Content-Type": "application/json",
           },
-          data: { members, records, renewals },
+          data: { members, records, renewals, weeklyReports },
         },
       ),
       result = await upload.json();
@@ -416,6 +446,7 @@ async function sync() {
       ...result,
       latestDate: latestRecordDate,
       completedMeetingCount: completedMeetings.length,
+      weeklyReportCount: weeklyReports.length,
     };
   } finally {
     await browser.close();

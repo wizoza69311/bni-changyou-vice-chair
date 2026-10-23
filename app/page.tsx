@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import WeeklyPalms from "./weekly-palms";
 import "./renewals.css";
 import "./committee.css";
 import "./readability.css";
@@ -169,6 +170,7 @@ type View =
   | "groups"
   | "schedules"
   | "quality"
+  | "weekly"
   | "history";
 
 const reportDate = new Date("2026-08-24T00:00:00+08:00");
@@ -379,6 +381,7 @@ const nav: { id: View; label: string; icon: string }[] = [
   { id: "groups", label: "分組管理", icon: "⊞" },
   { id: "schedules", label: "行政排班", icon: "▤" },
   { id: "quality", label: "出缺席管理", icon: "◇" },
+  { id: "weekly", label: "每週會務數據", icon: "▥" },
   { id: "history", label: "會議紀錄儲存", icon: "▣" },
   { id: "admin", label: "系統後臺", icon: "⚙" },
 ];
@@ -541,7 +544,7 @@ export default function Home() {
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors.filter((visitor:Visitor)=>isValidVisitorName(visitor?.name||"")));serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
   useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
   useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
-  useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="admin"))setView("dashboard")},[adminStatus,view]);
+  useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="admin"||view==="weekly"))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
   const committeeAgendaTasks=openTasks.filter(task=>task.source!=="meeting"||task.dueDate!==archiveDate).sort((a,b)=>b.id-a.id);
   const meetingDecisionTasks=tasks.filter(task=>task.source==="meeting"&&task.dueDate===archiveDate).sort((a,b)=>a.id-b.id);
@@ -934,7 +937,7 @@ export default function Home() {
           </div>
         </div>
         <nav>
-          {nav.filter(n=>!(["groups","admin"] as View[]).includes(n.id)||adminStatus?.isOwner).map((n) => (
+          {nav.filter(n=>!(["groups","admin","weekly"] as View[]).includes(n.id)||adminStatus?.isOwner).map((n) => (
             <button
               key={n.id}
               className={view === n.id ? "active" : ""}
@@ -1107,6 +1110,7 @@ export default function Home() {
               <section className="panel bni-connect-setup server-sync-panel"><div><div><b>本機同步工具設定</b><small>第一次連接或更換電腦時才需要設定</small></div><p>同步工具會更新在籍會員、續約到期日、滾動六個月 PALMS 與會員 KPI；報表不完整時不會覆蓋正確資料。</p><details className="connect-sync-check"><summary>產生或更換同步金鑰</summary><button type="button" onClick={createBniSyncPair}>產生新的同步金鑰</button>{bniSyncKey&&<label>同步金鑰<input value={bniSyncKey} readOnly onFocus={event=>event.currentTarget.select()}/></label>}<small>建立新金鑰後，舊金鑰會立即失效；請貼到本機同步工具的設定檔。</small></details></div></section>
             </section>
           )}
+          {view === "weekly" && adminStatus?.isOwner && <WeeklyPalms/>}
           {view === "members" && (
             <section className="member-master-page">
               <div className="renewal-summary"><div><span>01</span><h3>會員主檔</h3><p>所有使用者可檢視 PALMS、分組、續約與關懷狀態；只有管理員可維護 KPI</p></div><strong>{memberProfiles.length}<small>在籍會員</small></strong></div>

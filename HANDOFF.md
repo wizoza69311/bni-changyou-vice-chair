@@ -47,6 +47,8 @@ npm run db:generate
 - `/api/member-care-owners`：分組與關懷負責人連動
 - `/api/v1/groups`、`/api/v1/members/:name/group`：分組 API
 - `/api/v1/bni-sync`：瀏覽器工具同步 PALMS
+- `/api/weekly-palms`：管理員檢視已完成例會的來賓、引薦單、PALMS 交易價值與審計篩選金額
+- `/api/weekly-palms/reviews`：管理員逐筆標記本會交易的人工查核狀態與備註
 - `/api/admin-status`：目前使用者的擁有者權限狀態
 
 ## 部署環境變數
@@ -64,7 +66,7 @@ npm run db:generate
 
 ## BNI Connect／PALMS
 
-BNI Connect 會對公開伺服器直連回覆 403，因此正式同步採 Chrome 擴充工具：
+目前網站後臺的一鍵更新會呼叫 `sync-service/` 雲端同步器，在登入後的瀏覽器工作階段讀取 BNI Connect；原有 Chrome 擴充工具保留作為備援。擴充工具流程如下：
 
 1. 管理員在會員主檔產生一次性同步配對金鑰。
 2. 使用者登入 BNI Connect 後，由擴充工具在瀏覽器工作階段讀取報表。
@@ -72,6 +74,8 @@ BNI Connect 會對公開伺服器直連回覆 403，因此正式同步採 Chrome
 4. 新配對金鑰產生後，舊金鑰立即失效。
 
 目前統計採包含當月的連續六個月；每兩次遲到折算一次缺席，偶數次遲到在矩陣顯示為 `L/A`。
+
+雲端同步器也從最近已完成的分會 PALMS 逐週擷取「提供內部／外部引薦、來賓、交易價值」，並嘗試讀取同週審計報告。審計交易僅將「詳細資料」未標註其他分會者列入本會交易；審計明細總額與 PALMS 總額不一致或讀取失敗時，頁面會明確顯示待核對，不會冒充已驗證。個別交易的人工勾選紀錄另存，不受再次同步覆蓋。
 
 ## 權限與個資
 
