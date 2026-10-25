@@ -49,13 +49,14 @@ npm run db:generate
 - `/api/v1/bni-sync`：瀏覽器工具同步 PALMS
 - `/api/weekly-palms`：管理員檢視已完成例會的來賓、引薦單、PALMS 交易價值與審計篩選金額
 - `/api/weekly-palms/reviews`：管理員逐筆標記本會交易的人工查核狀態與備註
-- `/api/admin-status`：目前使用者的擁有者權限狀態
+- `/api/admin-status`：目前使用者的擁有者與授權管理員權限狀態
 
 ## 部署環境變數
 
 實際值只應設定於 Sites 的加密環境變數，禁止提交到 Git。程式會使用下列名稱：
 
 - `ADMIN_EMAIL`
+- `ADMIN_EMAILS`：以逗號分隔的授權管理員信箱；可使用系統後臺一鍵更新與分組管理，擁有者專用的刪除與金鑰設定仍只看 `ADMIN_EMAIL`
 - `GROUPS_API_KEY`
 - `GROUPS_READ_API_KEY`
 - `BNI_TOKEN_ENCRYPTION_KEY`

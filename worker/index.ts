@@ -1,11 +1,13 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { authenticatedEmail, isSiteAdmin, isSiteOwner } from "./admin-access";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   ADMIN_EMAIL?: string;
+  ADMIN_EMAILS?: string;
   GROUPS_API_KEY?: string;
   GROUPS_READ_API_KEY?: string;
   BNI_TOKEN_ENCRYPTION_KEY?: string;
@@ -71,8 +73,8 @@ const worker = {
       const corsHeaders={"content-type":"application/json; charset=utf-8","cache-control":"no-store","access-control-allow-origin":"*","access-control-allow-headers":"authorization, content-type, if-match","access-control-allow-methods":"GET, PUT, OPTIONS"};
       const v1Json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:corsHeaders});
       if(request.method==="OPTIONS")return new Response(null,{status:204,headers:corsHeaders});
-      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      const isOwner=Boolean(email&&admin&&email===admin),hasFullKey=Boolean(env.GROUPS_API_KEY&&bearer===env.GROUPS_API_KEY),hasReadKey=Boolean(env.GROUPS_READ_API_KEY&&bearer===env.GROUPS_READ_API_KEY),authorized=isOwner||hasFullKey||hasReadKey;
+      const bearer=(request.headers.get("authorization")||"").replace(/^Bearer\s+/i,"").trim(),email=authenticatedEmail(request);
+      const isAdmin=isSiteAdmin(request,env),hasFullKey=Boolean(env.GROUPS_API_KEY&&bearer===env.GROUPS_API_KEY),hasReadKey=Boolean(env.GROUPS_READ_API_KEY&&bearer===env.GROUPS_READ_API_KEY),authorized=isAdmin||hasFullKey||hasReadKey;
       if(!env.GROUPS_API_KEY&&!env.GROUPS_READ_API_KEY&&!email)return v1Json({error:"分組 API 尚未啟用"},503);
       if(!authorized)return v1Json({error:"API Key 無效或未提供"},401);
       if(!env.DB)return v1Json({error:"分組資料庫尚未啟用"},503);
@@ -83,7 +85,7 @@ const worker = {
       if(request.method==="GET"&&groupIdMatch){const group=groups.find(item=>item.id===Number(groupIdMatch[1]));return group?v1Json({data:group,meta:{updatedAt:current?.updatedAt||null}}):v1Json({error:"找不到組別"},404)}
       if(request.method==="GET"&&memberMatch){const name=decodeURIComponent(memberMatch[1]).replace(/\s+/g,"");const group=groups.find(item=>item.members.some(member=>member.name.replace(/\s+/g,"")===name));if(!group)return v1Json({error:"找不到會員分組"},404);const member=group.members.find(item=>item.name.replace(/\s+/g,"")===name);return v1Json({data:{member:member?.name,role:member?.role,groupId:group.id,committee:group.members.find(item=>item.role==="委員")?.name||"",leader:group.members.find(item=>item.role==="小組長")?.name||""},meta:{updatedAt:current?.updatedAt||null}})}
       if(request.method==="PUT"&&url.pathname==="/api/v1/groups"){
-        if(!isOwner&&!hasFullKey)return v1Json({error:"此 API Key 僅有讀取權限"},403);
+        if(!isAdmin&&!hasFullKey)return v1Json({error:"此 API Key 僅有讀取權限"},403);
         const body=await request.json() as Record<string,unknown>,next=Array.isArray(body.groups)?body.groups as Array<{id:number;members:Array<{name:string;role:string}>}>:[],baseUpdatedAt=String(request.headers.get("if-match")||body.baseUpdatedAt||"").replace(/^W\//,"").replaceAll('"',"");
         if(baseUpdatedAt&&current?.updatedAt&&baseUpdatedAt!==current.updatedAt)return v1Json({error:"分組資料已被更新",data:groups,meta:{updatedAt:current.updatedAt}},409);
         const roles=new Set(["十長","委員","導師","小組長","組員"]),ids=next.map(group=>Number(group.id)),members=next.flatMap(group=>Array.isArray(group.members)?group.members:[]),names=members.map(member=>String(member.name||"").trim()).filter(Boolean);
@@ -98,8 +100,7 @@ const worker = {
 
     if (url.pathname === "/api/admin-status" && request.method === "GET") {
       const email = (request.headers.get("oai-authenticated-user-email") || "").trim().toLowerCase();
-      const adminEmail = (env.ADMIN_EMAIL || "").trim().toLowerCase();
-      return apiJson({ authenticated: Boolean(email), isOwner: Boolean(email && adminEmail && email === adminEmail) });
+      return apiJson({ authenticated: Boolean(email), isOwner: isSiteOwner(request,env), isAdmin: isSiteAdmin(request,env) });
     }
 
     if(url.pathname==="/api/member-kpis"){
@@ -188,8 +189,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/bni-sync/health"&&request.method==="GET"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以查看同步工具狀態"},403);
+      if(!isSiteAdmin(request,env))return apiJson({error:"只有授權管理員可以查看同步工具狀態"},403);
       if(!env.DB)return apiJson({online:false,lastSeenAt:null,job:{state:"idle"}});
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_runner (id INTEGER PRIMARY KEY CHECK (id=1), last_seen_at TEXT NOT NULL)`).run();
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_job (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL DEFAULT 'idle', requested_at TEXT, started_at TEXT, completed_at TEXT, message TEXT NOT NULL DEFAULT '')`).run();
@@ -225,8 +225,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/bni-sync/run"&&request.method==="POST"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以執行一鍵更新"},403);
+      if(!isSiteAdmin(request,env))return apiJson({error:"只有授權管理員可以執行一鍵更新"},403);
       if(!env.DB)return apiJson({error:"伺服器同步尚未啟用"},503);
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_run (id INTEGER PRIMARY KEY CHECK (id=1), state TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
       const running=await env.DB.prepare(`SELECT state,updated_at AS updatedAt FROM bni_sync_run WHERE id=1`).first<{state:string;updatedAt:string}>();
@@ -532,9 +531,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/member-groups"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase();
-      const adminEmail=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!adminEmail||email!==adminEmail)return apiJson({error:"此功能僅限系統管理員"},403);
+      if(!isSiteAdmin(request,env))return apiJson({error:"此功能僅限系統管理員"},403);
       if(!env.DB)return apiJson({error:"分組資料庫尚未啟用"},503);
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_group_state (id INTEGER PRIMARY KEY CHECK (id=1), groups TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
       const current=await env.DB.prepare(`SELECT groups,updated_at AS updatedAt FROM member_group_state WHERE id=1`).first<{groups:string;updatedAt:string}>();

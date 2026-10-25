@@ -474,7 +474,7 @@ export default function Home() {
   const [lastSyncedAt,setLastSyncedAt]=useState("");
   const [connectSyncStatus,setConnectSyncStatus]=useState<ConnectSyncStatus|null>(null);
   const [syncToolHealth,setSyncToolHealth]=useState<SyncToolHealth|null>(null);
-  const [adminStatus,setAdminStatus]=useState<{authenticated:boolean;isOwner:boolean}|null>(null);
+  const [adminStatus,setAdminStatus]=useState<{authenticated:boolean;isOwner:boolean;isAdmin:boolean}|null>(null);
   const [adminLoginOpen,setAdminLoginOpen]=useState(false);
   const [bniSession,setBniSession]=useState<{connected:boolean;updatedAt:string|null}>({connected:false,updatedAt:null});
   const [bniTokenDraft,setBniTokenDraft]=useState({accessToken:"",refreshToken:""});
@@ -539,12 +539,12 @@ export default function Home() {
     fetch("/api/letter-notifications").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.notifications))setLetterNotifications(data.notifications)}).catch(()=>{});
   }, []);
   useEffect(()=>{const refresh=()=>fetch("/api/bni-sync/status").then(r=>r.ok?r.json():null).then(data=>setConnectSyncStatus(data?.status||null)).catch(()=>{});refresh();const timer=setInterval(refresh,30000);return()=>clearInterval(timer)},[]);
-  useEffect(()=>{if(!adminStatus?.isOwner){setSyncToolHealth(null);return}const refresh=()=>fetch("/api/bni-sync/health").then(r=>r.ok?r.json():null).then(data=>data&&setSyncToolHealth(data)).catch(()=>setSyncToolHealth(null));refresh();const timer=setInterval(refresh,10000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
+  useEffect(()=>{if(!adminStatus?.isAdmin){setSyncToolHealth(null);return}const refresh=()=>fetch("/api/bni-sync/health").then(r=>r.ok?r.json():null).then(data=>data&&setSyncToolHealth(data)).catch(()=>setSyncToolHealth(null));refresh();const timer=setInterval(refresh,10000);return()=>clearInterval(timer)},[adminStatus?.isAdmin]);
   useEffect(()=>{fetch("/api/admin-schedules").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.schedules)&&data.schedules.length)setDutySchedules(data.schedules)}).catch(()=>{})},[]);
   useEffect(()=>{const timer=setInterval(()=>{if(savingRef.current)return;fetch("/api/practice").then(r=>r.ok?r.json():null).then(data=>{if(!data?.updatedAt||data.updatedAt===serverVersionRef.current)return;if(Array.isArray(data.renewals)&&data.renewals.length>=80)setRenewals(data.renewals);if(Array.isArray(data.tasks))setTasks(data.tasks);if(Array.isArray(data.visitors))setVisitors(data.visitors.filter((visitor:Visitor)=>isValidVisitorName(visitor?.name||"")));serverVersionRef.current=data.updatedAt;setLastSyncedAt(data.updatedAt);flash("已同步其他委員的最新更新")}).catch(()=>{})},5000);return()=>clearInterval(timer)},[]);
-  useEffect(()=>{if(!adminStatus?.isOwner)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isOwner]);
+  useEffect(()=>{if(!adminStatus?.isAdmin)return;const timer=setInterval(()=>{if(groupSavingRef.current)return;fetch("/api/member-groups").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{})},5000);return()=>clearInterval(timer)},[adminStatus?.isAdmin]);
   useEffect(()=>{setCareAssignments(deriveCareAssignments(memberGroups))},[memberGroups]);
-  useEffect(()=>{if(adminStatus&&!adminStatus.isOwner&&(view==="groups"||view==="admin"||view==="weekly"))setView("dashboard")},[adminStatus,view]);
+  useEffect(()=>{if(adminStatus&&((!adminStatus.isAdmin&&(view==="groups"||view==="admin"))||(!adminStatus.isOwner&&view==="weekly")))setView("dashboard")},[adminStatus,view]);
   const openTasks = tasks.filter((t) => t.status !== "done");
   const committeeAgendaTasks=openTasks.filter(task=>task.source!=="meeting"||task.dueDate!==archiveDate).sort((a,b)=>b.id-a.id);
   const meetingDecisionTasks=tasks.filter(task=>task.source==="meeting"&&task.dueDate===archiveDate).sort((a,b)=>a.id-b.id);
@@ -937,7 +937,7 @@ export default function Home() {
           </div>
         </div>
         <nav>
-          {nav.filter(n=>!(["groups","admin","weekly"] as View[]).includes(n.id)||adminStatus?.isOwner).map((n) => (
+          {nav.filter(n=>n.id==="weekly"?adminStatus?.isOwner:(["groups","admin"] as View[]).includes(n.id)?adminStatus?.isAdmin:true).map((n) => (
             <button
               key={n.id}
               className={view === n.id ? "active" : ""}
@@ -951,7 +951,7 @@ export default function Home() {
             </button>
           ))}
         </nav>
-        <button type="button" className={`admin-login-trigger ${adminStatus?.isOwner?"signed-in":""}`} onClick={()=>setAdminLoginOpen(true)}><span>{adminStatus?.isOwner?"✓":"🔐"}</span><div><b>{adminStatus?.isOwner?"管理員已登入":"管理員登入"}</b><small>{adminStatus?.isOwner?"管理功能已解鎖":"手機／其他電腦登入"}</small></div></button>
+        <button type="button" className={`admin-login-trigger ${adminStatus?.isAdmin?"signed-in":""}`} onClick={()=>setAdminLoginOpen(true)}><span>{adminStatus?.isAdmin?"✓":"🔐"}</span><div><b>{adminStatus?.isAdmin?"管理員已登入":"管理員登入"}</b><small>{adminStatus?.isAdmin?"管理功能已解鎖":"手機／其他電腦登入"}</small></div></button>
         <div className="side-section">
           <span>委員功能</span>
           <button disabled>出席管理</button>
@@ -1092,9 +1092,9 @@ export default function Home() {
               </div>
             </>
           )}
-          {view === "admin" && adminStatus?.isOwner && (
+          {view === "admin" && adminStatus?.isAdmin && (
             <section className="admin-backend-page">
-              <div className="renewal-summary"><div><span>ADMIN</span><h3>系統後臺</h3><p>僅限系統擁有者使用；集中管理 BNI Connect 資料更新與同步工具設定</p></div><strong>權限限定<small>管理員專區</small></strong></div>
+              <div className="renewal-summary"><div><span>ADMIN</span><h3>系統後臺</h3><p>授權管理員可更新 BNI Connect 資料；同步金鑰僅限系統擁有者設定</p></div><strong>權限限定<small>管理員專區</small></strong></div>
               <section className="connect-sync-card" aria-label="會員人數監控">
                 <header><h2>會員人數監控</h2><span>實際分組人數＝Connect 帳上人數－未分組虛帳</span></header>
                 <div>
@@ -1107,7 +1107,7 @@ export default function Home() {
               </section>
               <section className={`panel sync-tool-health ${syncToolHealth?.online?"online":"offline"}`}><div className="sync-health-main"><span aria-hidden="true"/><div><small>{syncToolHealth?.mode==="cloud"?"雲端同步服務":"本機同步工具"}</small><h3>{syncToolHealth===null?"正在偵測…":syncToolHealth.online?"在線，可以正常更新":"離線，暫時無法更新"}</h3><p>{syncToolHealth?.lastSeenAt?`${syncToolHealth.mode==="cloud"?"最近檢查":"最後心跳"} ${syncDateTime(syncToolHealth.lastSeenAt)}`:"尚未取得服務狀態"}</p></div></div><div className="sync-job-state"><small>更新工作</small><b>{{pending:"等待工具接收",running:"正在更新",success:"上次更新成功",failed:"上次更新失敗",idle:"尚無工作"}[syncToolHealth?.job.state||"idle"]||syncToolHealth?.job.state}</b>{syncToolHealth?.job.message&&<p>{syncToolHealth.job.message}</p>}</div></section>
               <section className={`connect-sync-card ${connectSyncHealth}`}><header><div><small>BNI CONNECT 資料更新</small><h2>{connectSyncHealth==="ready"?"資料已更新且檢查完成":connectSyncHealth==="stale"?attendanceHealth.status==="waiting"?"等待最新例會資料":"超過七天未更新":connectSyncHealth==="error"?"資料已更新，但仍有缺漏待核對":"尚無同步紀錄"}</h2></div><time>{connectSyncStatus?`上次成功更新 ${syncDateTime(connectSyncStatus.lastSyncAt)}`:"尚未完成同步"}</time></header><div><article><small>出缺席</small><b>{connectSyncStatus?.attendance.latestDate?`更新至 ${fmt(connectSyncStatus.attendance.latestDate)}`:"尚無資料"}</b><span>{connectSyncStatus&&syncedRosterNames?`${connectSyncStatus.attendance.count} 筆 · 最新週 Connect 在籍會員 ${attendanceHealth.latestCount}/${attendanceHealth.activeCount} 位`:"—"}</span></article><article><small>續約追蹤</small><b>{connectSyncStatus?.renewals.updatedAt?syncDateTime(connectSyncStatus.renewals.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.renewals.count} 位會員`:"—"}</span></article><article><small>會員主檔</small><b>{connectSyncStatus?.members.updatedAt?syncDateTime(connectSyncStatus.members.updatedAt):"尚無資料"}</b><span>{connectSyncStatus?`${connectSyncStatus.members.count} 位 Connect 帳上會員`:"—"}</span></article></div><button type="button" className="server-sync-button" disabled={serverSyncing||!syncToolHealth?.online||["pending","running"].includes(syncToolHealth?.job.state||"")} onClick={runServerBniSync}>{serverSyncing||syncToolHealth?.job.state==="running"?"正在更新資料…":syncToolHealth?.job.state==="pending"?"等待同步工具…":syncToolHealth===null?"正在偵測工具…":!syncToolHealth.online?"同步工具離線":"一鍵更新全部資料"}</button>{attendanceHealth.status==="incomplete"&&<details className="connect-sync-check"><summary>查看 {attendanceHealth.missingMembers.length} 位缺漏會員</summary><p>{attendanceHealth.missingMembers.join("、")}</p></details>}{attendanceHealth.status==="waiting"&&<p className="connect-sync-check-note">BNI Connect 尚未提供 {fmt(attendanceHealth.expectedDate)} 的完整資料，系統不會把空白誤算成缺席。</p>}</section>
-              <section className="panel bni-connect-setup server-sync-panel"><div><div><b>{syncToolHealth?.mode==="cloud"?"免開瀏覽器更新":"本機同步工具設定"}</b><small>{syncToolHealth?.mode==="cloud"?"由雲端同步服務執行":"第一次連接或更換電腦時才需要設定"}</small></div><p>{syncToolHealth?.mode==="cloud"?"按下更新後，雲端服務會讀取 BNI Connect，不必先在這台電腦開啟或登入 BNI。若 BNI 要求額外驗證，系統會顯示失敗原因。":"同步工具會更新在籍會員、續約到期日、滾動六個月 PALMS 與會員 KPI；報表不完整時不會覆蓋正確資料。"}</p>{syncToolHealth?.mode!=="cloud"&&<details className="connect-sync-check"><summary>產生或更換同步金鑰</summary><button type="button" onClick={createBniSyncPair}>產生新的同步金鑰</button>{bniSyncKey&&<label>同步金鑰<input value={bniSyncKey} readOnly onFocus={event=>event.currentTarget.select()}/></label>}<small>建立新金鑰後，舊金鑰會立即失效；請貼到本機同步工具的設定檔。</small></details>}</div></section>
+              <section className="panel bni-connect-setup server-sync-panel"><div><div><b>{syncToolHealth?.mode==="cloud"?"免開瀏覽器更新":"本機同步工具設定"}</b><small>{syncToolHealth?.mode==="cloud"?"由雲端同步服務執行":"第一次連接或更換電腦時才需要設定"}</small></div><p>{syncToolHealth?.mode==="cloud"?"按下更新後，雲端服務會讀取 BNI Connect，不必先在這台電腦開啟或登入 BNI。若 BNI 要求額外驗證，系統會顯示失敗原因。":"同步工具會更新在籍會員、續約到期日、滾動六個月 PALMS 與會員 KPI；報表不完整時不會覆蓋正確資料。"}</p>{adminStatus?.isOwner&&syncToolHealth?.mode!=="cloud"&&<details className="connect-sync-check"><summary>產生或更換同步金鑰</summary><button type="button" onClick={createBniSyncPair}>產生新的同步金鑰</button>{bniSyncKey&&<label>同步金鑰<input value={bniSyncKey} readOnly onFocus={event=>event.currentTarget.select()}/></label>}<small>建立新金鑰後，舊金鑰會立即失效；請貼到本機同步工具的設定檔。</small></details>}</div></section>
             </section>
           )}
           {view === "weekly" && adminStatus?.isOwner && <WeeklyPalms/>}
@@ -1561,7 +1561,7 @@ export default function Home() {
               </div>
             </section>
           )}
-          {view === "groups" && adminStatus?.isOwner && (
+          {view === "groups" && adminStatus?.isAdmin && (
             <section className="group-page">
               <div className="renewal-summary"><div><span>05</span><h3>十二組分組管理</h3><p>將會員拖曳到各組，並設定十長、委員、導師、小組長或組員</p></div><strong>{assignedMemberNames.size}<small>已分組會員</small></strong></div>
               <div className="group-toolbar panel"><div><b>分組進度</b><small>{assignedMemberNames.size} 人已安排・{unassignedMemberNames.length} 人待安排</small></div><span>拖曳會員卡即可換組，變更後自動儲存</span><a href="/api-docs/groups" target="_blank" rel="noreferrer">API 文件 ↗</a></div>
@@ -1732,7 +1732,7 @@ export default function Home() {
         </div>
         {notice && <div className="toast">✓　{notice}</div>}
       </main>
-      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isOwner?<><p>你已經以系統擁有者身分登入，系統後臺與分組管理已解鎖；會員主檔所有使用者均可檢視。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用系統擁有者的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用擁有者帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
+      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isAdmin?<><p>{adminStatus.isOwner?"你已經以系統擁有者身分登入。":"你已經以授權管理員身分登入。"}系統後臺與分組管理已解鎖；會員主檔所有使用者均可檢視。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用已授權的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用授權帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
     </div>
   );
 }
