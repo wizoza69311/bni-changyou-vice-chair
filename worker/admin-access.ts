@@ -6,13 +6,12 @@ export function authenticatedEmail(request: Request): string {
 
 export function isSiteOwner(request: Request, env: AdminEnv): boolean {
   const email = authenticatedEmail(request);
-  return Boolean(email && email === (env.ADMIN_EMAIL || "").trim().toLowerCase());
+  return Boolean(email && (
+    email === (env.ADMIN_EMAIL || "").trim().toLowerCase() ||
+    (env.ADMIN_EMAILS || "").split(/[\s,;]+/).some(value => value.toLowerCase() === email)
+  ));
 }
 
 export function isSiteAdmin(request: Request, env: AdminEnv): boolean {
-  if (isSiteOwner(request, env)) return true;
-  const email = authenticatedEmail(request);
-  return Boolean(email && (env.ADMIN_EMAILS || "")
-    .split(/[\s,;]+/)
-    .some(value => value.toLowerCase() === email));
+  return isSiteOwner(request, env);
 }

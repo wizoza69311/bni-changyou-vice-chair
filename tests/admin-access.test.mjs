@@ -10,10 +10,11 @@ const requestFor = email => new Request("https://example.com/api/admin-status", 
   headers: email ? { "oai-authenticated-user-email": email } : {},
 });
 
-test("owner remains the only owner", () => {
+test("both configured accounts receive full system access", () => {
   assert.equal(isSiteOwner(requestFor("OWNER@EXAMPLE.COM"), env), true);
   assert.equal(isSiteAdmin(requestFor("OWNER@EXAMPLE.COM"), env), true);
-  assert.equal(isSiteOwner(requestFor("helper@example.com"), env), false);
+  assert.equal(isSiteOwner(requestFor("helper@example.com"), env), true);
+  assert.equal(isSiteAdmin(requestFor("helper@example.com"), env), true);
 });
 
 test("only allowlisted signed-in emails gain admin access", () => {

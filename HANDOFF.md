@@ -56,7 +56,7 @@ npm run db:generate
 實際值只應設定於 Sites 的加密環境變數，禁止提交到 Git。程式會使用下列名稱：
 
 - `ADMIN_EMAIL`
-- `ADMIN_EMAILS`：以逗號分隔的授權管理員信箱；可使用系統後臺一鍵更新與分組管理，擁有者專用的刪除與金鑰設定仍只看 `ADMIN_EMAIL`
+- `ADMIN_EMAILS`：以逗號分隔的完整權限管理員信箱；與 `ADMIN_EMAIL` 同樣可使用系統後臺、每週會務數據、查核、分組及其他管理功能
 - `GROUPS_API_KEY`
 - `GROUPS_READ_API_KEY`
 - `BNI_TOKEN_ENCRYPTION_KEY`

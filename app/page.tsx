@@ -1094,7 +1094,7 @@ export default function Home() {
           )}
           {view === "admin" && adminStatus?.isAdmin && (
             <section className="admin-backend-page">
-              <div className="renewal-summary"><div><span>ADMIN</span><h3>系統後臺</h3><p>授權管理員可更新 BNI Connect 資料；同步金鑰僅限系統擁有者設定</p></div><strong>權限限定<small>管理員專區</small></strong></div>
+              <div className="renewal-summary"><div><span>ADMIN</span><h3>系統後臺</h3><p>完整權限管理員可更新 BNI Connect 資料並設定同步金鑰</p></div><strong>權限限定<small>管理員專區</small></strong></div>
               <section className="connect-sync-card" aria-label="會員人數監控">
                 <header><h2>會員人數監控</h2><span>實際分組人數＝Connect 帳上人數－未分組虛帳</span></header>
                 <div>
@@ -1426,7 +1426,7 @@ export default function Home() {
                 </strong>
               </div>
               <div className="history-admin-bar">
-                {adminStatus?.isOwner ? <span>管理員模式：可刪除紀錄</span> : <><span>只有系統擁有者可刪除會議紀錄</span><a href="/signin-with-chatgpt?return_to=/?admin=1">管理員登入</a></>}
+                {adminStatus?.isOwner ? <span>管理員模式：可刪除紀錄</span> : <><span>只有完整權限管理員可刪除會議紀錄</span><a href="/signin-with-chatgpt?return_to=/?admin=1">管理員登入</a></>}
               </div>
               {renewalGroups.map((group) => {
                 const d = new Date(`${group.date}T00:00:00`);
@@ -1732,7 +1732,7 @@ export default function Home() {
         </div>
         {notice && <div className="toast">✓　{notice}</div>}
       </main>
-      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isAdmin?<><p>{adminStatus.isOwner?"你已經以系統擁有者身分登入。":"你已經以授權管理員身分登入。"}系統後臺與分組管理已解鎖；會員主檔所有使用者均可檢視。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用已授權的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用授權帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
+      {adminLoginOpen&&<div className="admin-login-backdrop" role="presentation" onMouseDown={()=>setAdminLoginOpen(false)}><section className="admin-login-modal" role="dialog" aria-modal="true" aria-labelledby="admin-login-title" onMouseDown={event=>event.stopPropagation()}><button type="button" className="admin-login-close" aria-label="關閉" onClick={()=>setAdminLoginOpen(false)}>×</button><div className="admin-login-icon">🔐</div><small>BNI 長佑分會</small><h2 id="admin-login-title">系統管理員登入</h2>{adminStatus?.isAdmin?<><p>你已經以完整權限管理員身分登入。系統後臺、每週會務數據與分組管理已解鎖；會員主檔所有使用者均可檢視。</p><a className="admin-login-primary" href="/signout-with-chatgpt?return_to=/">登出管理員</a></>:<><p>請使用已授權的 ChatGPT 帳號登入。同一帳號可在手機或其他電腦開啟管理功能。</p><a className="admin-login-primary" href="/signin-with-chatgpt?return_to=/?admin=1" target="_top">使用授權帳號登入</a><small className="admin-login-note">委員與一般使用者不需登入，仍可使用公開功能。</small></>}</section></div>}
     </div>
   );
 }

@@ -104,8 +104,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/member-kpis"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(request.method!=="GET"&&(!email||!admin||email!==admin))return apiJson({error:"只有系統擁有者可以維護 KPI"},403);
+      if(request.method!=="GET"&&!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以維護 KPI"},403);
       if(!env.DB)return apiJson({error:"KPI 資料庫尚未啟用"},503);
       const selectSql=`SELECT member, training_points AS trainingPoints, visitor_count AS visitorCount, one_to_one_weekly_average AS oneToOneWeeklyAverage, referral_weekly_average AS referralWeeklyAverage, referral_total AS referralTotal, dream_referral_amount AS dreamReferralAmount, updated_at AS updatedAt FROM member_kpi_state`;
       if(request.method==="GET"){
@@ -290,8 +289,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/bni-connect/session"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以設定 BNI Connect"},403);
+      if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以設定 BNI Connect"},403);
       if(!env.DB||!env.BNI_TOKEN_ENCRYPTION_KEY)return apiJson({error:"BNI Connect 安全儲存尚未啟用"},503);
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_connect_session (id INTEGER PRIMARY KEY CHECK (id=1), encrypted_session TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
       if(request.method==="GET"){
@@ -309,8 +307,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/bni-connect/test"&&request.method==="POST"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以測試 BNI Connect"},403);
+      if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以測試 BNI Connect"},403);
       if(!env.DB||!env.BNI_TOKEN_ENCRYPTION_KEY)return apiJson({error:"BNI Connect 安全儲存尚未啟用"},503);
       const row=await env.DB.prepare(`SELECT encrypted_session AS encryptedSession FROM bni_connect_session WHERE id=1`).first<{encryptedSession:string}>();
       if(!row?.encryptedSession)return apiJson({error:"尚未儲存 BNI Connect Token"},404);
@@ -329,8 +326,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/bni-sync/pair"&&request.method==="POST"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以建立同步金鑰"},403);
+      if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以建立同步金鑰"},403);
       if(!env.DB)return apiJson({error:"資料庫尚未啟用"},503);
       const bytes=crypto.getRandomValues(new Uint8Array(32)),syncKey=`bni_sync_${Array.from(bytes,b=>b.toString(16).padStart(2,"0")).join("")}`,digest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(syncKey))),b=>b.toString(16).padStart(2,"0")).join(""),updatedAt=new Date().toISOString();
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_credential (id INTEGER PRIMARY KEY CHECK (id=1), key_hash TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
@@ -339,8 +335,7 @@ const worker = {
     }
 
     if(url.pathname==="/api/weekly-palms"||url.pathname==="/api/weekly-palms/reviews"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return apiJson({error:"每週 PALMS 與審計資料僅限系統擁有者檢視"},403);
+      if(!isSiteOwner(request,env))return apiJson({error:"每週 PALMS 與審計資料僅限完整權限管理員使用"},403);
       if(!env.DB)return apiJson({error:"資料庫尚未啟用"},503);
       if(url.pathname==="/api/weekly-palms"&&request.method==="GET"){
         const rows=await env.DB.prepare(`SELECT meeting_date AS meetingDate,summary,audit,updated_at AS updatedAt FROM weekly_palms_reports ORDER BY meeting_date DESC LIMIT 16`).all<{meetingDate:string;summary:string;audit:string;updatedAt:string}>();
@@ -436,8 +431,7 @@ const worker = {
     }
 
     if(url.pathname==="/api-docs/groups"){
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||!admin||email!==admin)return new Response("此頁面僅限系統擁有者",{status:403,headers:{"content-type":"text/plain; charset=utf-8"}});
+      if(!isSiteOwner(request,env))return new Response("此頁面僅限完整權限管理員",{status:403,headers:{"content-type":"text/plain; charset=utf-8"}});
     }
 
     if(url.pathname==="/api/admin-schedules"){
@@ -448,8 +442,7 @@ const worker = {
         return apiJson({schedules:JSON.parse(row?.schedules||"[]"),updatedAt:row?.updatedAt||null});
       }
       if(request.method==="POST"){
-        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-        if(!email||!admin||email!==admin)return apiJson({error:"只有系統擁有者可以修改行政排班"},403);
+        if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以修改行政排班"},403);
         const body=await request.json() as {schedules?:unknown},schedules=Array.isArray(body.schedules)?body.schedules:[];
         const updatedAt=new Date().toISOString();
         await env.DB.prepare(`INSERT INTO admin_schedule_state (id,schedules,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET schedules=excluded.schedules,updated_at=excluded.updated_at`).bind(JSON.stringify(schedules),updatedAt).run();
@@ -579,8 +572,7 @@ const worker = {
       const row=await env.DB.prepare(`SELECT records,updated_at AS updatedAt FROM attendance_state WHERE id=1`).first<{records:string;updatedAt:string}>();
       if(request.method==="GET")return apiJson({records:JSON.parse(row?.records||"[]"),updatedAt:row?.updatedAt||null});
       if(request.method==="POST"){
-        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-        if(!email||email!==admin)return apiJson({error:"只有系統擁有者可以同步 PALMS"},403);
+        if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以同步 PALMS"},403);
         const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],baseUpdatedAt=String(body.baseUpdatedAt||"");
         if(baseUpdatedAt&&row?.updatedAt&&baseUpdatedAt!==row.updatedAt)return apiJson({error:"PALMS 資料已被其他畫面更新",records:JSON.parse(row.records||"[]"),updatedAt:row.updatedAt},409);
         const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code)));
@@ -593,8 +585,7 @@ const worker = {
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS attendance_conversion_state (id INTEGER PRIMARY KEY CHECK (id=1), conversions TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
       const row=await env.DB.prepare(`SELECT conversions,updated_at AS updatedAt FROM attendance_conversion_state WHERE id=1`).first<{conversions:string;updatedAt:string}>();
       if(request.method==="GET")return apiJson({conversions:JSON.parse(row?.conversions||"[]"),updatedAt:row?.updatedAt||null});
-      const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase(),admin=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-      if(!email||email!==admin)return apiJson({error:"只有系統擁有者可以設定遲到折算"},403);
+      if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以設定遲到折算"},403);
       const body=await request.json() as Record<string,unknown>,conversions=Array.isArray(body.conversions)?body.conversions:[];
       const valid=conversions.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.convertedDate))&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.pairedLateDate))&&x.pairedLateDate<x.convertedDate);
       const now=new Date().toISOString();
@@ -626,10 +617,8 @@ const worker = {
         return apiJson({archive:row?parseArchive(row):null},201);
       }
       if(request.method==="DELETE" && Number.isInteger(archiveId) && archiveId>0){
-        const email=(request.headers.get("oai-authenticated-user-email")||"").trim().toLowerCase();
-        const adminEmail=(env.ADMIN_EMAIL||"").trim().toLowerCase();
-        if(!email)return apiJson({error:"請先以管理員身分登入"},401);
-        if(!adminEmail||email!==adminEmail)return apiJson({error:"只有系統擁有者可以刪除會議紀錄"},403);
+        if(!authenticatedEmail(request))return apiJson({error:"請先以管理員身分登入"},401);
+        if(!isSiteOwner(request,env))return apiJson({error:"只有完整權限管理員可以刪除會議紀錄"},403);
         const existing=await env.DB.prepare(`SELECT id FROM weekly_archives WHERE id=?`).bind(archiveId).first();
         if(!existing)return apiJson({error:"找不到這筆會議紀錄"},404);
         await env.DB.prepare(`DELETE FROM weekly_archives WHERE id=?`).bind(archiveId).run();
