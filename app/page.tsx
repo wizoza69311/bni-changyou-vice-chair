@@ -621,7 +621,7 @@ export default function Home() {
   const activeVisitors=visitors.filter((visitor)=>visitor.visitDate===visitorRelayDate&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&!visitor.agendaExcludedDates?.includes(visitorRelayDate));
   const visitorAssignmentText=activeVisitors
     .filter(visitor=>isValidVisitorName(visitor.name))
-    .map(visitor=>`${visitor.name.trim()}(來賓) > ${visitor.owner?.trim()||"未指派"}(委員)`)
+    .map(visitor=>`${visitor.name.trim()} > ${visitor.owner?.trim()||"未指派"}`)
     .join("\n");
   function visitorLastActivity(visitor:Visitor){return visitor.logs?.at(-1)?.date||visitor.interviewDate||visitor.visitDate||todayKey}
   function visitorInactiveDays(visitor:Visitor){return Math.max(0,Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitorLastActivity(visitor)}T00:00:00`).getTime())/86400000))}
