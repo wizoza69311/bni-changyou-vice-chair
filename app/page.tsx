@@ -470,6 +470,7 @@ export default function Home() {
   const [visitorRelayDraft,setVisitorRelayDraft]=useState("");
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
   const [showVisitorAssignmentText,setShowVisitorAssignmentText]=useState(false);
+  const [showDutyAssignmentDate,setShowDutyAssignmentDate]=useState("");
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
   const [showPendingInterviews,setShowPendingInterviews]=useState(false);
   const [visitorTrackingFilter,setVisitorTrackingFilter]=useState<VisitorTrackingFilter>("全部");
@@ -941,6 +942,7 @@ export default function Home() {
   async function saveAttendanceConversions(next:AttendanceConversion[]){try{const response=await fetch("/api/attendance-conversions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({conversions:next})}),data=await response.json();if(!response.ok)throw new Error(data.error||"折算註記儲存失敗");setAttendanceConversions(data.conversions||next);setConversionDraft(null);flash("遲到折算註記已儲存")}catch(error){flash(error instanceof Error?error.message:"折算註記儲存失敗")}}
   function openAttendanceConversion(member:string,convertedDate:string){const existing=attendanceConversions.find(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate),used=new Set(attendanceConversions.filter(item=>!(normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate)).map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`)),candidates=attendanceRecords.filter(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.code==="L"&&item.date<convertedDate&&!used.has(`${normalizeMemberName(member)}|${item.date}`)).sort((a,b)=>b.date.localeCompare(a.date));setConversionDraft({member,convertedDate,pairedLateDate:existing?.pairedLateDate||candidates[0]?.date||""})}
   async function updateDuty(date:string,key:Exclude<keyof AdminDutySchedule,"date">,value:string){const next=dutySchedules.map(row=>row.date===date?{...row,[key]:value}:row);setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(!response.ok){flash("行政排班儲存失敗，請稍後重試");return}flash("行政排班已儲存")}
+  async function generateDutyAssignmentText(date:string,text:string){setShowDutyAssignmentDate(date);try{await navigator.clipboard.writeText(text);flash("當週工作與委員名單已產生並複製")}catch{flash("名單已產生，請從下方文字框複製")}}
   async function clearDutyForCloser(date:string,owner:string){let removed=false;const next=dutySchedules.map(row=>{if(row.date!==date)return row;const updated={...row};dutyFields.forEach(field=>{if(updated[field.key]===owner){updated[field.key]="";removed=true}});return updated});if(!removed)return;setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(response.ok)flash(`${owner} 已安排來賓締結，該週行政職務已自動移除`)}
 
   return (
@@ -1614,6 +1616,7 @@ export default function Home() {
               <details className="panel duty-stats"><summary><b>輪值統計</b><span>展開查看公平性</span></summary><div>{dutyCommitteeMembers.map(member=><article key={member}><b>{member}</b><span>總計 {dutyFields.reduce((sum,field)=>sum+dutySchedules.filter(row=>row[field.key]===member).length,0)} 次</span>{dutyFields.map(field=><small key={field.key}>{field.label} {dutySchedules.filter(row=>row[field.key]===member).length}</small>)}</article>)}</div></details>
               <section className="duty-week-list">
                 {visibleDutySchedules.length ? visibleDutySchedules.map((row,index)=>{
+                  const dutyAssignmentText=dutyFields.map(field=>`${field.label} > ${row[field.key]?.trim()||"待安排"}`).join("\n");
                   const closers=new Set(visitors.filter(visitor=>visitor.visitDate===row.date&&visitor.owner&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會").map(visitor=>visitor.owner));
                   const assignedNames=dutyFields.map(field=>row[field.key]).filter(Boolean);
                   const assigned=assignedNames.length;
@@ -1623,6 +1626,7 @@ export default function Home() {
                     <header><div><strong>{index===0?"當週排班":"後續排班"}</strong><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排{closers.size?` · ${closers.size} 位締結委員已排除`:""}</small></div>{closerConflicts.length?<em>與締結衝突</em>:duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header>
                     {closers.size>0&&<p className="duty-closers">本週締結優先：{[...closers].join("、")}</p>}
                     <div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{dutyCommitteeMembers.filter(member=>!closers.has(member)||member===row[field.key]).sort((a,b)=>dutySchedules.filter(schedule=>schedule[field.key]===a).length-dutySchedules.filter(schedule=>schedule[field.key]===b).length).map(member=><option key={member} disabled={closers.has(member)}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div>
+                    {index===0&&<section className="visitor-assignment-export" aria-label="當週排班文字名單"><div><b>當週工作與委員</b><small>依目前排班產生文字，尚未指派的職務會標示「待安排」</small></div><button type="button" onClick={()=>generateDutyAssignmentText(row.date,dutyAssignmentText)}>一鍵產生並複製文字</button>{showDutyAssignmentDate===row.date&&<label><span>產生結果</span><textarea aria-label="當週工作與委員文字名單" readOnly value={dutyAssignmentText} onFocus={event=>event.currentTarget.select()} rows={dutyFields.length}/></label>}</section>}
                   </article>
                 }) : <section className="panel duty-empty">目前沒有待執行的行政排班</section>}
               </section>
