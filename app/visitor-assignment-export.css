@@ -1,0 +1,10 @@
+.visitor-assignment-export{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:#f8f7f4;border:1px solid #e3ddd6;border-radius:7px}
+.visitor-assignment-export>div b,.visitor-assignment-export>div small{display:block}
+.visitor-assignment-export>div b{font-size:13px}
+.visitor-assignment-export>div small{margin-top:4px;color:#777;font-size:10px}
+.visitor-assignment-export>button{min-height:38px;padding:8px 14px;color:#fff;background:#242426;border:0;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer}
+.visitor-assignment-export>button:hover{background:#414145}
+.visitor-assignment-export>label{width:100%;margin:0}
+.visitor-assignment-export>label span{display:block;margin-bottom:6px;color:#5e6064;font-size:10px;font-weight:700}
+.visitor-assignment-export textarea{width:100%;min-height:78px;padding:10px 12px;border:1px solid #d9d5cf;border-radius:5px;background:#fff;color:#222;font:12px/1.7 "Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;resize:vertical}
+@media(max-width:650px){.visitor-assignment-export>button{width:100%}}

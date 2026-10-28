@@ -25,6 +25,7 @@ import "./visitor-relay.css";
 import "./visitor-group-field.css";
 import "./visitor-delete.css";
 import "./visitor-field-spacing.css";
+import "./visitor-assignment-export.css";
 import "./quality.css";
 import "./palms-health.css";
 import "./admin-login.css";
@@ -468,6 +469,7 @@ export default function Home() {
   const [decisionOwner,setDecisionOwner]=useState("");
   const [visitorRelayDraft,setVisitorRelayDraft]=useState("");
   const [visitorRelayDate,setVisitorRelayDate]=useState(upcomingThursdayKey());
+  const [showVisitorAssignmentText,setShowVisitorAssignmentText]=useState(false);
   const [visitorLogDraft,setVisitorLogDraft]=useState<Record<number,string>>({});
   const [showPendingInterviews,setShowPendingInterviews]=useState(false);
   const [visitorTrackingFilter,setVisitorTrackingFilter]=useState<VisitorTrackingFilter>("全部");
@@ -482,6 +484,7 @@ export default function Home() {
   const [serverSyncing,setServerSyncing]=useState(false);
   const [qualityDraft,setQualityDraft]=useState({member:"",issue:"缺席" as QualityCase["issue"],occurredDate:taipeiDateKey(),owner:"",note:""});
   const savingRef=useRef(false),groupSavingRef=useRef(false),serverVersionRef=useRef("");
+  useEffect(()=>setShowVisitorAssignmentText(false),[visitorRelayDate]);
   useEffect(() => {
     fetch("/api/practice")
       .then((r) => (r.ok ? r.json() : null))
@@ -616,6 +619,10 @@ export default function Home() {
   const activeKpiValues=activeKpiScores?Object.values(activeKpiScores):[],activeKpiComplete=activeKpiValues.length===6&&activeKpiValues.every(value=>value!==null),activeKpiTotal=activeKpiComplete?activeKpiValues.reduce<number>((sum,value)=>sum+(value||0),0):null;
   const activeKpiLight=activeKpiTotal===null?null:activeKpiTotal>=70?"green":activeKpiTotal>=50?"yellow":activeKpiTotal>=30?"red":"black";
   const activeVisitors=visitors.filter((visitor)=>visitor.visitDate===visitorRelayDate&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會"&&!visitor.agendaExcludedDates?.includes(visitorRelayDate));
+  const visitorAssignmentText=activeVisitors
+    .filter(visitor=>isValidVisitorName(visitor.name))
+    .map(visitor=>`${visitor.name.trim()}(來賓) > ${visitor.owner?.trim()||"未指派"}(委員)`)
+    .join("\n");
   function visitorLastActivity(visitor:Visitor){return visitor.logs?.at(-1)?.date||visitor.interviewDate||visitor.visitDate||todayKey}
   function visitorInactiveDays(visitor:Visitor){return Math.max(0,Math.floor((new Date(`${todayKey}T00:00:00`).getTime()-new Date(`${visitorLastActivity(visitor)}T00:00:00`).getTime())/86400000))}
   const currentWeekVisitors=useMemo(()=>visitors.filter(visitor=>visitor.visitDate===visitorRelayDate),[visitors,visitorRelayDate]);
@@ -792,6 +799,16 @@ export default function Home() {
   }
   function updateVisitorInterview(visitor:Visitor,status:VisitorInterviewStatus){const changes:Partial<Visitor>={interviewStatus:status};if(status==="已訪談"&&!visitor.interviewDate)changes.interviewDate=todayKey;if(status==="保留追蹤"||status==="考慮加入")changes.stage="持續追蹤";if(status==="不追蹤")changes.stage="不追蹤";if(status==="已入會")changes.stage="已入會";if(status==="申請中"&&(!visitor.stage||visitor.stage==="待確認"||visitor.stage==="有意願"||visitor.stage==="持續追蹤"))changes.stage="已簽單";updateVisitor(visitor.id,changes)}
   function removeVisitorFromAgenda(visitor:Visitor){if(!window.confirm(`確定要將來賓「${visitor.name}」從 ${fmt(visitorRelayDate)} 議程移除嗎？\n來賓追蹤資料與聯絡紀錄會完整保留。`))return;const agendaExcludedDates=[...new Set([...(visitor.agendaExcludedDates||[]),visitorRelayDate])];updateVisitor(visitor.id,{agendaExcludedDates});flash(`${visitor.name} 已從本週議程移除，追蹤資料仍保留`)}
+  async function generateVisitorAssignmentText(){
+    if(!visitorAssignmentText){flash("本週議程目前沒有可產生的來賓名單");return}
+    setShowVisitorAssignmentText(true);
+    try{
+      await navigator.clipboard.writeText(visitorAssignmentText);
+      flash("來賓與締結委員名單已產生並複製");
+    }catch{
+      flash("名單已產生，請從下方文字框手動複製");
+    }
+  }
   function addVisitorLog(visitor:Visitor){const text=visitorLogDraft[visitor.id]?.trim();if(!text)return;const nextLogs=[...(visitor.logs||[]),{date:todayKey,owner:visitor.owner||"未指派",text}];updateVisitor(visitor.id,{logs:nextLogs,note:text});setVisitorLogDraft({...visitorLogDraft,[visitor.id]:""});flash("追蹤紀錄已新增")}
   function addVisitor(){if(!visitorDraft.name.trim()||!visitorDraft.email.trim()){flash("請填寫來賓姓名與 Email");return}const visitor={id:Date.now(),name:visitorDraft.name.trim(),email:visitorDraft.email.trim(),inviter:visitorDraft.inviter.trim()||"現場新增",profession:visitorDraft.profession.trim()||"待補充",attendance:"預計出席",interest:"待確認",owner:"",note:"",stage:"待確認",visitDate:visitorRelayDate,receptionOwner:"",followUpDate:"",logs:[]} as Visitor;setVisitors(current=>[...current,visitor]);setVisitorDraft({name:"",email:"",inviter:"",profession:""});patchRecord("visitor",visitor.id,visitor as unknown as Record<string,unknown>,"create");flash(`臨時來賓已加入 ${fmt(visitorRelayDate)} 議程`)}
   function visitorAddForm(){return <div className="quick-visitor-add"><div><b>臨時新增來賓</b><small>姓名與 Email 為必填</small></div><input value={visitorDraft.name} onChange={(e)=>setVisitorDraft({...visitorDraft,name:e.target.value})} placeholder="來賓姓名＊"/><input type="email" value={visitorDraft.email} onChange={(e)=>setVisitorDraft({...visitorDraft,email:e.target.value})} placeholder="Email＊"/><input value={visitorDraft.inviter} onChange={(e)=>setVisitorDraft({...visitorDraft,inviter:e.target.value})} placeholder="邀請人"/><input value={visitorDraft.profession} onChange={(e)=>setVisitorDraft({...visitorDraft,profession:e.target.value})} placeholder="專業類別"/><button onClick={addVisitor}>＋ 新增</button></div>}
@@ -1257,6 +1274,17 @@ export default function Home() {
                       ) : g.title === "來賓追蹤" ? (
                         <div className="meeting-visitors">
                           {visitorRelayForm()}
+                          <div className="visitor-assignment-export">
+                            <div>
+                              <b>來賓與締結委員文字名單</b>
+                              <small>依當週議程產生，每位來賓一行；未指派者會明確標示。</small>
+                            </div>
+                            <button type="button" onClick={generateVisitorAssignmentText}>一鍵產生並複製文字</button>
+                            {showVisitorAssignmentText&&<label>
+                              <span>產生結果</span>
+                              <textarea aria-label="來賓與締結委員文字名單" readOnly value={visitorAssignmentText} onFocus={event=>event.currentTarget.select()} rows={Math.max(3,Math.min(10,activeVisitors.length))}/>
+                            </label>}
+                          </div>
                           {activeVisitors.map((visitor, j) => (
                             <article
                               key={visitor.id}
