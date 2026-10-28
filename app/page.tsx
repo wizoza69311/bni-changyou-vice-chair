@@ -1276,17 +1276,17 @@ export default function Home() {
                       ) : g.title === "來賓追蹤" ? (
                         <div className="meeting-visitors">
                           {visitorRelayForm()}
-                          <div className="visitor-assignment-export">
-                            <div>
-                              <b>來賓與締結委員文字名單</b>
-                              <small>依當週議程產生，每位來賓一行；未指派者會明確標示。</small>
+                          <details className="visitor-assignment-details">
+                            <summary>來賓與締結委員文字名單</summary>
+                            <div className="visitor-assignment-export">
+                              <div><b>一鍵產生文字</b><small>依當週議程產生，每位來賓一行；未指派者會明確標示。</small></div>
+                              <button type="button" onClick={generateVisitorAssignmentText}>一鍵產生並複製文字</button>
+                              {showVisitorAssignmentText&&<label>
+                                <span>產生結果</span>
+                                <textarea aria-label="來賓與締結委員文字名單" readOnly value={visitorAssignmentText} onFocus={event=>event.currentTarget.select()} rows={Math.max(3,Math.min(10,activeVisitors.length))}/>
+                              </label>}
                             </div>
-                            <button type="button" onClick={generateVisitorAssignmentText}>一鍵產生並複製文字</button>
-                            {showVisitorAssignmentText&&<label>
-                              <span>產生結果</span>
-                              <textarea aria-label="來賓與締結委員文字名單" readOnly value={visitorAssignmentText} onFocus={event=>event.currentTarget.select()} rows={Math.max(3,Math.min(10,activeVisitors.length))}/>
-                            </label>}
-                          </div>
+                          </details>
                           {activeVisitors.map((visitor, j) => (
                             <article
                               key={visitor.id}
@@ -1626,7 +1626,7 @@ export default function Home() {
                     <header><div><strong>{index===0?"當週排班":"後續排班"}</strong><b>{fmt(row.date)}（四）</b><small>{assigned}/{dutyFields.length} 項已安排{closers.size?` · ${closers.size} 位締結委員已排除`:""}</small></div>{closerConflicts.length?<em>與締結衝突</em>:duplicateNames.length?<em>人員重複</em>:assigned===dutyFields.length?<span>已完成</span>:<em>待安排 {dutyFields.length-assigned} 項</em>}</header>
                     {closers.size>0&&<p className="duty-closers">本週締結優先：{[...closers].join("、")}</p>}
                     <div>{dutyFields.map(field=><label key={field.key}><span>{field.label}</span>{adminStatus?.isOwner?<select value={row[field.key]} onChange={event=>updateDuty(row.date,field.key,event.target.value)}><option value="">待安排</option>{dutyCommitteeMembers.filter(member=>!closers.has(member)||member===row[field.key]).sort((a,b)=>dutySchedules.filter(schedule=>schedule[field.key]===a).length-dutySchedules.filter(schedule=>schedule[field.key]===b).length).map(member=><option key={member} disabled={closers.has(member)}>{member}</option>)}</select>:<b>{row[field.key]||"待安排"}</b>}</label>)}</div>
-                    {index===0&&<section className="visitor-assignment-export" aria-label="當週排班文字名單"><div><b>當週工作與委員</b><small>依目前排班產生文字，尚未指派的職務會標示「待安排」</small></div><button type="button" onClick={()=>generateDutyAssignmentText(row.date,dutyAssignmentText)}>一鍵產生並複製文字</button>{showDutyAssignmentDate===row.date&&<label><span>產生結果</span><textarea aria-label="當週工作與委員文字名單" readOnly value={dutyAssignmentText} onFocus={event=>event.currentTarget.select()} rows={dutyFields.length}/></label>}</section>}
+                    {index===0&&<details className="visitor-assignment-details"><summary>當週工作與委員文字名單</summary><section className="visitor-assignment-export" aria-label="當週排班文字名單"><div><b>一鍵產生文字</b><small>依目前排班產生，尚未指派的職務會標示「待安排」</small></div><button type="button" onClick={()=>generateDutyAssignmentText(row.date,dutyAssignmentText)}>一鍵產生並複製文字</button>{showDutyAssignmentDate===row.date&&<label><span>產生結果</span><textarea aria-label="當週工作與委員文字名單" readOnly value={dutyAssignmentText} onFocus={event=>event.currentTarget.select()} rows={dutyFields.length}/></label>}</section></details>}
                   </article>
                 }) : <section className="panel duty-empty">目前沒有待執行的行政排班</section>}
               </section>

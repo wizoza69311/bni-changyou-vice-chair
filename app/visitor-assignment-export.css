@@ -1,3 +1,9 @@
+.visitor-assignment-details{overflow:hidden;border:1px solid #e3ddd6;border-radius:7px;background:#f8f7f4}
+.visitor-assignment-details>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 18px;cursor:pointer;list-style:none;font-size:13px;font-weight:700}
+.visitor-assignment-details>summary::-webkit-details-marker{display:none}
+.visitor-assignment-details>summary::after{content:"⌄";color:#70685f;font-size:18px;line-height:1;transition:transform .2s}
+.visitor-assignment-details[open]>summary::after{transform:rotate(180deg)}
+.visitor-assignment-details>.visitor-assignment-export{border:0;border-top:1px solid #e3ddd6;border-radius:0}
 .visitor-assignment-export{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:#f8f7f4;border:1px solid #e3ddd6;border-radius:7px}
 .visitor-assignment-export>div b,.visitor-assignment-export>div small{display:block}
 .visitor-assignment-export>div b{font-size:13px}
