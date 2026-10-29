@@ -394,6 +394,7 @@ const worker = {
         const numericFields=["inside","outside","visitors","transactionValue"] as const;
         if(membersForWeek.length!==memberRows.length||membersForWeek.some(row=>String(row.member).length>100||numericFields.some(field=>!Number.isSafeInteger(row[field])||Number(row[field])<0)))continue;
         if(numericFields.some(field=>!Number.isSafeInteger(totals[field])||Number(totals[field])!==membersForWeek.reduce((sum,row)=>sum+Number(row[field]),0)))continue;
+        if(totals.oneToOne!==undefined&&(membersForWeek.some(row=>!Number.isSafeInteger(row.oneToOne)||Number(row.oneToOne)<0)||!Number.isSafeInteger(totals.oneToOne)||Number(totals.oneToOne)!==membersForWeek.reduce((sum,row)=>sum+Number(row.oneToOne),0)))continue;
         const incomingAudit=report.audit&&typeof report.audit==="object"?report.audit as Record<string,unknown>:{status:"unavailable"};
         const rawTransactions=Array.isArray(incomingAudit.ownTransactions)?incomingAudit.ownTransactions:[];
         const auditValid=["verified","mismatch","unavailable"].includes(String(incomingAudit.status))&&rawTransactions.length<=500&&rawTransactions.every(row=>row&&typeof row.id==="string"&&row.id.length<=180&&typeof row.member==="string"&&Number.isSafeInteger(row.amount)&&row.amount>0);

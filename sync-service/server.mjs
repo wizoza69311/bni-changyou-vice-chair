@@ -242,7 +242,8 @@ async function chapterPalmsAttendance(page, meeting, chapter, rosterMembers) {
   }
   let report;
   try {
-    report = parseChapterSummary(meeting.date, rows, rosterMembers);
+    const headers = await page.locator("#datalist thead tr").last().locator("th,td").allTextContents();
+    report = parseChapterSummary(meeting.date, rows, rosterMembers, headers);
   } catch (error) {
     console.warn(`Weekly summary unavailable for ${meeting.date}:`, error instanceof Error ? error.message : String(error));
     return { records, report: null };

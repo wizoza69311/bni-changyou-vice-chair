@@ -4,10 +4,11 @@ const integer = (value) => {
   return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
 };
 
-export function parseChapterSummary(meetingDate, tableRows, rosterMembers) {
+export function parseChapterSummary(meetingDate, tableRows, rosterMembers, headers = []) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate) || !Array.isArray(tableRows)) {
     throw Error("分會 PALMS 週報資料格式異常");
   }
+  const oneToOneIndex = headers.findIndex(value => /^(一對一(?:會談)?|121|1to1|one[- ]?to[- ]?ones?)$/i.test(String(value).replace(/\s+/g, "")));
   const members = tableRows.filter((row) => {
     const name = normalizeName(`${row[0] || ""}${row[1] || ""}`);
     return name && !["BNI", "來賓", "合計", "總計"].includes(name);
@@ -21,6 +22,7 @@ export function parseChapterSummary(meetingDate, tableRows, rosterMembers) {
       inside: integer(row[3]),
       outside: integer(row[4]),
       visitors: integer(row[7]),
+      ...(oneToOneIndex >= 0 ? { oneToOne: integer(row[oneToOneIndex]) } : {}),
       transactionValue: integer(row[9]),
     };
   });
@@ -31,6 +33,7 @@ export function parseChapterSummary(meetingDate, tableRows, rosterMembers) {
     visitors: result.visitors + row.visitors,
     transactionValue: result.transactionValue + row.transactionValue,
   }), { inside: 0, outside: 0, visitors: 0, transactionValue: 0 });
+  if (oneToOneIndex >= 0) totals.oneToOne = members.reduce((sum, row) => sum + row.oneToOne, 0);
   return { meetingDate, totals, members, source: "BNI 分會 PALMS" };
 }
 

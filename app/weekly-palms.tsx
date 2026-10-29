@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./weekly-palms.css";
 
-type MemberRow = { member:string; inside:number; outside:number; visitors:number; transactionValue:number };
+type MemberRow = { member:string; inside:number; outside:number; visitors:number;oneToOne?:number; transactionValue:number };
 type Transaction = { id:string; member:string; amount:number };
 type Audit = { status:"verified"|"mismatch"|"unavailable"; total:number|null; ownTotal:number|null; otherChapterTotal:number|null; transactionCount:number; ownTransactions:Transaction[] };
-type Report = { meetingDate:string; summary:{ totals:{inside:number;outside:number;visitors:number;transactionValue:number};members:MemberRow[];source:string };audit:Audit;updatedAt:string };
+type Report = { meetingDate:string; summary:{ totals:{inside:number;outside:number;visitors:number;oneToOne?:number;transactionValue:number};members:MemberRow[];source:string };audit:Audit;updatedAt:string };
 type Review = { key:string;meetingDate:string;transactionId:string;checked:number;note:string;updatedAt:string };
-type SortKey = "referrals"|"visitors"|"value";
+type SortKey = "referrals"|"visitors"|"oneToOne"|"value";
 const money=(value:number)=>`NT$ ${value.toLocaleString("zh-TW")}`;
 const top=(rows:MemberRow[],score:(row:MemberRow)=>number)=>{
   const highest=Math.max(0,...rows.map(score));
@@ -51,7 +51,7 @@ export default function WeeklyPalms(){
   const normalizedQuery=query.replace(/\s+/g,"").toLowerCase();
   const visibleMembers=useMemo(()=>{
     if(!report)return [];
-    const score=(row:MemberRow)=>sortBy==="referrals"?row.inside+row.outside:sortBy==="visitors"?row.visitors:row.transactionValue;
+    const score=(row:MemberRow)=>sortBy==="referrals"?row.inside+row.outside:sortBy==="visitors"?row.visitors:sortBy==="oneToOne"?(row.oneToOne??-1):row.transactionValue;
     return report.summary.members.filter(row=>!normalizedQuery||row.member.replace(/\s+/g,"").toLowerCase().includes(normalizedQuery)).sort((a,b)=>score(b)-score(a)||a.member.localeCompare(b.member,"zh-Hant"));
   },[report,sortBy,normalizedQuery]);
   const visibleTransactions=useMemo(()=>{
@@ -82,10 +82,11 @@ export default function WeeklyPalms(){
       <div className="weekly-palms-cards">
         <article className="panel"><small>提供引薦單（內＋外）</small><b>{(report.summary.totals.inside+report.summary.totals.outside).toLocaleString("zh-TW")}<em>張</em></b><span>內部 {report.summary.totals.inside} · 外部 {report.summary.totals.outside}</span><p>第一名：{top(report.summary.members,row=>row.inside+row.outside)}</p></article>
         <article className="panel"><small>來賓</small><b>{report.summary.totals.visitors.toLocaleString("zh-TW")}<em>位</em></b><span>以本次分會 PALMS「來賓」欄為準</span><p>第一名：{top(report.summary.members,row=>row.visitors)}</p></article>
+        <article className="panel"><small>121（一對一）</small><b>{report.summary.totals.oneToOne==null?"待同步":report.summary.totals.oneToOne.toLocaleString("zh-TW")}<em>次</em></b><span>依本週 PALMS 一對一欄位加總</span><p>{report.summary.totals.oneToOne==null?"此週尚未取得 121 資料":`第一名：${top(report.summary.members,row=>row.oneToOne??0)}`}</p></article>
         <article className="panel"><small>PALMS 交易價值（全部分會）</small><b>{money(report.summary.totals.transactionValue)}</b><span>包含與其他分會往來</span><p>第一名：{top(report.summary.members,row=>row.transactionValue)}</p></article>
         <article className="panel weekly-palms-audit-card"><small>本會交易價值（審計篩選）</small><b>{report.audit.ownTotal===null?"待查核":money(report.audit.ownTotal)}</b><span>{auditState==="verified"?"審計明細總額與 PALMS 一致":auditState==="mismatch"?"明細總額與 PALMS 不一致，請核對":"審計明細尚未讀取成功"} · 排除其他分會 {report.audit.otherChapterTotal===null?"—":money(report.audit.otherChapterTotal)}</span><p>第一名：{ownValueLeaders}</p></article>
       </div>
-      <section className="panel weekly-palms-table-panel"><header><div><h4>會員本週排行</h4><small>引薦單依「提供內部＋提供外部」計，不混用收到的引薦</small></div><div className="weekly-palms-pills">{(["referrals","visitors","value"] as SortKey[]).map((key)=><button type="button" className={sortBy===key?"active":""} key={key} onClick={()=>setSortBy(key)}>{({referrals:"引薦單",visitors:"來賓",value:"交易價值"})[key]}</button>)}</div></header><div className="weekly-palms-table-scroll"><table><thead><tr><th>會員</th><th>內部</th><th>外部</th><th>引薦單合計</th><th>來賓</th><th>PALMS 交易價值</th></tr></thead><tbody>{visibleMembers.map(row=><tr key={row.member}><th>{row.member}</th><td>{row.inside}</td><td>{row.outside}</td><td>{row.inside+row.outside}</td><td>{row.visitors}</td><td>{money(row.transactionValue)}</td></tr>)}</tbody></table></div>{visibleMembers.length===0&&<p className="weekly-palms-empty-inline">找不到符合的會員</p>}</section>
+      <section className="panel weekly-palms-table-panel"><header><div><h4>會員本週排行</h4><small>引薦單依「提供內部＋提供外部」計，不混用收到的引薦</small></div><div className="weekly-palms-pills">{(["referrals","visitors","oneToOne","value"] as SortKey[]).map((key)=><button type="button" className={sortBy===key?"active":""} key={key} onClick={()=>setSortBy(key)}>{({referrals:"引薦單",visitors:"來賓",oneToOne:"121",value:"交易價值"})[key]}</button>)}</div></header><div className="weekly-palms-table-scroll"><table><thead><tr><th>會員</th><th>內部</th><th>外部</th><th>引薦單合計</th><th>來賓</th><th>121</th><th>PALMS 交易價值</th></tr></thead><tbody>{visibleMembers.map(row=><tr key={row.member}><th>{row.member}</th><td>{row.inside}</td><td>{row.outside}</td><td>{row.inside+row.outside}</td><td>{row.visitors}</td><td>{row.oneToOne??"待同步"}</td><td>{money(row.transactionValue)}</td></tr>)}</tbody></table></div>{visibleMembers.length===0&&<p className="weekly-palms-empty-inline">找不到符合的會員</p>}</section>
       <section className="panel weekly-palms-audit"><header><div><h4>本會高額交易待核對</h4><small>只列審計報告「詳細資料」未標其他分會的交易；勾選代表已人工核對，並非自動判定有無引薦單</small></div><span className={`weekly-palms-badge ${auditState||"unavailable"}`}>{auditState==="verified"?"審計總額一致":auditState==="mismatch"?"金額待核對":"審計未取得"}</span></header>{auditState==="unavailable"?<p className="weekly-palms-empty-inline">本次只取得 PALMS 概要，審計明細尚未同步；不會用概要金額冒充本會交易。</p>:<><div className="weekly-palms-audit-list">{visibleTransactions.map(transaction=>{const key=`${report.meetingDate}|${transaction.id}`,review=reviewMap.get(key),note=draftNotes[key]??review?.note??"";return <article key={key}><label className="weekly-palms-check"><input type="checkbox" checked={Boolean(review?.checked)} disabled={saving===key} onChange={event=>void saveReview(transaction,event.target.checked,note)}/><span>{review?.checked?"已核對":"待核對"}</span></label><div><b>{transaction.member}</b><strong>{money(transaction.amount)}</strong></div><input aria-label={`${transaction.member} ${transaction.amount} 查核備註`} value={note} placeholder="查核備註（可留空）" onChange={event=>setDraftNotes(current=>({...current,[key]:event.target.value}))} onBlur={()=>{if(note!==(review?.note||""))void saveReview(transaction,Boolean(review?.checked),note)}}/></article>})}</div>{!normalizedQuery&&!showAllTransactions&&report.audit.ownTransactions.length>12&&<button className="weekly-palms-show-all" type="button" onClick={()=>setShowAllTransactions(true)}>查看全部 {report.audit.ownTransactions.length} 筆本會交易</button>}</>}</section>
     </>}
   </section>;

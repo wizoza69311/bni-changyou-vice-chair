@@ -29,3 +29,12 @@ test("audit excludes transactions explicitly marked as another chapter", () => {
 test("audit mismatch is explicit instead of claiming verification", () => {
   assert.equal(parseChapterAudit([["", "王 小明", "交易價值", "", "500", "", ""]], 600).status, "mismatch");
 });
+
+ test("121 follows its header, sums member counts and distinguishes missing data", () => {
+ const rows=Array.from({length:10},(_,i)=>["會員",String(i),"P",0,0,0,0,0,3,0,9]);
+ const headers=["姓","名","出席","內","外","收內","收外","來賓","一對一","交易價值","教育"];
+ const report=parseChapterSummary("2026-10-29",rows,new Map(),headers);
+ assert.equal(report.totals.oneToOne,30);
+ assert.equal(report.members[0].oneToOne,3);
+ assert.equal(parseChapterSummary("2026-10-29",rows,new Map()).totals.oneToOne,undefined);
+});
