@@ -1,6 +1,7 @@
 import http from "node:http";
 import { chromium } from "playwright";
 import { parseChapterAudit, parseChapterSummary } from "./palms-report.mjs";
+import { readCurrentChapterMembers } from "./current-members.mjs";
 
 const required = [
   "BNI_USERNAME",
@@ -389,9 +390,15 @@ async function sync() {
       ]),
       rosterRows = roster(rt);
     if (rosterRows.length < 10) throw Error("會員名冊筆數異常，已停止更新");
-    const members = [
-        ...new Set(rosterRows.map((i) => i.member.replace(/\s+/g, ""))),
-      ],
+    const members = await readCurrentChapterMembers(context, { chapter, region, country });
+    const rosterNames = new Set(rosterRows.map((i) => normalize(i.member)));
+    if (members.filter((member) => rosterNames.has(normalize(member))).length < Math.ceil(members.length * 0.8)) {
+      throw Error("Connect 現任名單與分會名單報告差異過大，已停止更新");
+    }
+    const activeNames = new Set(members.map(normalize));
+    const activeRosterRows = rosterRows.filter((row) => activeNames.has(normalize(row.member)));
+    console.log(`Connect membership: ${members.length} active, ${rosterRows.length - activeRosterRows.length} excluded from the chapter report`);
+    const
       rosterMembers = new Map(members.map((member) => [normalize(member), member])),
       byMemberAndDate = new Map(
         attendance(at, end)
@@ -423,7 +430,7 @@ async function sync() {
           .filter((i) => i.expiryDate)
           .map((i) => [normalize(i.member), i.expiryDate]),
       ),
-      renewals = rosterRows
+      renewals = activeRosterRows
         .map((i) => ({
           member: i.member,
           expiryDate: expiry.get(normalize(i.member)) || i.expiryDate,
