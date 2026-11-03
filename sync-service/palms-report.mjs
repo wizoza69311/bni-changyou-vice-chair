@@ -8,7 +8,9 @@ export function parseChapterSummary(meetingDate, tableRows, rosterMembers, heade
   if (!/^\d{4}-\d{2}-\d{2}$/.test(meetingDate) || !Array.isArray(tableRows)) {
     throw Error("分會 PALMS 週報資料格式異常");
   }
-  const oneToOneIndex = headers.findIndex(value => /^(一對一(?:會談)?|121|1to1|one[- ]?to[- ]?ones?)$/i.test(String(value).replace(/\s+/g, "")));
+  // BNI labels this column with variants such as「一對一會面」and「一對一會面（次）」.
+  // Match the metric within the heading rather than requiring an exact label.
+  const oneToOneIndex = headers.findIndex(value => /一對一|121|1to1|onetoone/i.test(String(value).normalize("NFKC").replace(/[\s_\-–—／/()（）:：.]/g, "")));
   const members = tableRows.filter((row) => {
     const name = normalizeName(`${row[0] || ""}${row[1] || ""}`);
     return name && !["BNI", "來賓", "合計", "總計"].includes(name);
