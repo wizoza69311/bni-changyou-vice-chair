@@ -401,7 +401,7 @@ async function sync() {
           .map((record) => [`${normalize(record.member)}|${record.date}`, record]),
       );
     const visitorPeriodStart = new Date(end.getFullYear() - 1, end.getMonth(), end.getDate() + 1);
-    let guestInvitations = null;
+    let guestInvitations = null, guestInvitationError = "";
     try {
       const annualParams = new URLSearchParams(capturedParams);
       annualParams.set("menuName", "menu.reports.chapter.palms.summary");
@@ -417,7 +417,8 @@ async function sync() {
         members: parseYearlyVisitors(await response.text(), rosterMembers),
       };
     } catch (error) {
-      console.warn("Yearly guest invitations unavailable:", error instanceof Error ? error.message : String(error));
+      guestInvitationError = error instanceof Error ? error.message : String(error);
+      console.warn("Yearly guest invitations unavailable:", guestInvitationError);
     }
     // The aggregate attendance export can lag behind a completed meeting. Reconcile
     // the recent completed chapter PALMS reports before replacing site data.
@@ -469,6 +470,7 @@ async function sync() {
       completedMeetingCount: completedMeetings.length,
       weeklyReportCount: weeklyReports.length,
       guestInvitationCount: guestInvitations?.members.length || 0,
+      guestInvitationError,
     };
   } finally {
     await browser.close();
