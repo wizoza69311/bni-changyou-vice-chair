@@ -334,9 +334,31 @@ const worker = {
       return apiJson({syncKey,updatedAt});
     }
 
-    if(url.pathname==="/api/weekly-palms"||url.pathname==="/api/weekly-palms/reviews"){
+    if(url.pathname==="/api/weekly-palms"||url.pathname==="/api/weekly-palms/reviews"||url.pathname==="/api/monthly-palms"){
       if(!isSiteOwner(request,env))return apiJson({error:"每週 PALMS 與審計資料僅限完整權限管理員使用"},403);
       if(!env.DB)return apiJson({error:"資料庫尚未啟用"},503);
+      if(url.pathname==="/api/monthly-palms"&&request.method==="GET"){
+        const monthRows=await env.DB.prepare(`SELECT DISTINCT substr(meeting_date,1,7) AS month FROM weekly_palms_reports ORDER BY month DESC`).all<{month:string}>();
+        const months=(monthRows.results||[]).map((row:{month:string})=>row.month).filter((month:string)=>/^\d{4}-\d{2}$/.test(month));
+        const requested=url.searchParams.get("month"),month=requested||months[0]||"";
+        if(requested&&!/^\d{4}-(0[1-9]|1[0-2])$/.test(requested))return apiJson({error:"月份格式不正確"},400);
+        const rows=month?await env.DB.prepare(`SELECT meeting_date AS meetingDate,summary,updated_at AS updatedAt FROM weekly_palms_reports WHERE substr(meeting_date,1,7)=? ORDER BY meeting_date`).bind(month).all<{meetingDate:string;summary:string;updatedAt:string}>():{results:[]};
+        type MonthlyMember={member:string;inside:number;outside:number;visitors:number;transactionValue:number};
+        const members=new Map<string,MonthlyMember>(),totals={inside:0,outside:0,visitors:0,transactionValue:0};
+        let updatedAt="";
+        for(const row of rows.results||[]){
+          const summary=JSON.parse(row.summary) as {totals:Omit<MonthlyMember,"member">;members:MonthlyMember[]};
+          for(const key of ["inside","outside","visitors","transactionValue"] as const)totals[key]+=summary.totals[key]||0;
+          for(const item of summary.members||[]){
+            const name=String(item.member||"").trim();if(!name)continue;
+            const combined=members.get(name)||{member:name,inside:0,outside:0,visitors:0,transactionValue:0};
+            for(const key of ["inside","outside","visitors","transactionValue"] as const)combined[key]+=item[key]||0;
+            members.set(name,combined);
+          }
+          if(row.updatedAt>updatedAt)updatedAt=row.updatedAt;
+        }
+        return apiJson({months,month,dates:(rows.results||[]).map((row:{meetingDate:string})=>row.meetingDate),updatedAt:updatedAt||null,totals,members:[...members.values()]});
+      }
       if(url.pathname==="/api/weekly-palms"&&request.method==="GET"){
         const rows=await env.DB.prepare(`SELECT meeting_date AS meetingDate,summary,audit,updated_at AS updatedAt FROM weekly_palms_reports ORDER BY meeting_date DESC LIMIT 16`).all<{meetingDate:string;summary:string;audit:string;updatedAt:string}>();
         const reviews=await env.DB.prepare(`SELECT key,meeting_date AS meetingDate,transaction_id AS transactionId,checked,note,updated_at AS updatedAt FROM weekly_palms_reviews ORDER BY updated_at DESC LIMIT 1000`).all();

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./weekly-palms.css";
+import MonthlyPalms from "./monthly-palms";
 
 type MemberRow = { member:string; inside:number; outside:number; visitors:number;oneToOne?:number; transactionValue:number };
 type Transaction = { id:string; member:string; amount:number };
@@ -16,6 +17,7 @@ const top=(rows:MemberRow[],score:(row:MemberRow)=>number)=>{
 };
 
 export default function WeeklyPalms(){
+  const [period,setPeriod]=useState<"weekly"|"monthly">("weekly");
   const [reports,setReports]=useState<Report[]>([]);
   const [reviews,setReviews]=useState<Review[]>([]);
   const [selectedDate,setSelectedDate]=useState("");
@@ -72,8 +74,10 @@ export default function WeeklyPalms(){
     }catch(caught){setError(caught instanceof Error?caught.message:"查核紀錄儲存失敗")}finally{setSaving("")}
   }
   const auditState=report?.audit.status;
+  if(period==="monthly")return <MonthlyPalms onWeekly={()=>setPeriod("weekly")}/>;
   return <section className="weekly-palms-page">
     <div className="renewal-summary"><div><span>WEEKLY</span><h3>每週會務數據</h3><p>依已完成的分會 PALMS 例會週報統計；審計金額另依「沒有其他分會」篩選</p></div><strong>{reports.length}<small>已保存週次</small></strong></div>
+    <div className="weekly-palms-period" role="group" aria-label="統計期間"><button type="button" className="active" aria-pressed="true">每週</button><button type="button" onClick={()=>setPeriod("monthly")}>每月</button></div>
     <div className="weekly-palms-toolbar panel"><label>例會日期<select value={selectedDate} onChange={event=>{setSelectedDate(event.target.value);setShowAllTransactions(false);setQuery("")}} disabled={!reports.length}>{reports.map(row=><option key={row.meetingDate} value={row.meetingDate}>{row.meetingDate}</option>)}</select></label><label>搜尋會員<input value={query} onChange={event=>setQuery(event.target.value)} placeholder="輸入姓名"/></label><button type="button" onClick={()=>void refresh()} disabled={loading}>{loading?"讀取中…":"重新整理數據"}</button></div>
     {error&&<p className="weekly-palms-error" role="alert">{error}</p>}
     {!loading&&!report&&<section className="panel weekly-palms-empty"><h4>尚未有每週數據</h4><p>在「系統後臺」按「一鍵更新全部資料」後，系統會讀取最近已完成的週四 PALMS 與審計報告，這裡才會顯示排行。</p></section>}
