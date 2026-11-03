@@ -18,8 +18,10 @@ export default function MonthlyPalms({onWeekly}:{onWeekly:()=>void}){
   const [error,setError]=useState("");
   const [sortBy,setSortBy]=useState<SortKey>("referrals");
   const [query,setQuery]=useState("");
+  const [copyStatus,setCopyStatus]=useState("");
   const load=useCallback(async(month="")=>{
     setLoading(true);
+    setCopyStatus("");
     try{
       const response=await fetch(`/api/monthly-palms${month?`?month=${encodeURIComponent(month)}`:""}`,{cache:"no-store"});
       const result=await response.json();
@@ -35,6 +37,17 @@ export default function MonthlyPalms({onWeekly}:{onWeekly:()=>void}){
     const score=(row:Member)=>sortBy==="visitors"?row.visitors:sortBy==="value"?row.transactionValue:row.inside+row.outside;
     return data.members.filter(row=>!normalizedQuery||row.member.replace(/\s+/g,"").toLowerCase().includes(normalizedQuery)).sort((a,b)=>score(b)-score(a)||a.member.localeCompare(b.member,"zh-Hant"));
   },[data,normalizedQuery,sortBy]);
+  async function copyLeaders(){
+    if(!data?.dates.length)return;
+    const month=`${data.month.slice(0,4)} 年 ${Number(data.month.slice(5))} 月`;
+    const text=[month,
+      `來賓第一名：${leader(data.members,row=>row.visitors,value=>`${value} 位`)}`,
+      `引薦單第一名：${leader(data.members,row=>row.inside+row.outside,value=>`${value} 張`)}`,
+      `引薦金額第一名：${leader(data.members,row=>row.transactionValue,money)}`
+    ].join("\n");
+    try{await navigator.clipboard.writeText(text);setCopyStatus("第一名文字已複製")}
+    catch{setCopyStatus("複製失敗，請檢查瀏覽器的剪貼簿權限")}
+  }
   return <section className="weekly-palms-page">
     <div className="renewal-summary"><div><span>MONTHLY</span><h3>每月會務數據</h3><p>按當月已同步的例會週報加總；交易金額包含所有分會</p></div><strong>{data?.dates.length||0}<small>已保存週次</small></strong></div>
     <div className="weekly-palms-period" role="group" aria-label="統計期間"><button type="button" onClick={onWeekly}>每週</button><button type="button" className="active" aria-pressed="true">每月</button></div>
@@ -43,6 +56,7 @@ export default function MonthlyPalms({onWeekly}:{onWeekly:()=>void}){
     {!loading&&!data?.dates.length&&<section className="panel weekly-palms-empty"><h4>這個月份尚未有會務數據</h4><p>請先在系統後臺同步分會 PALMS 週報。</p></section>}
     {data&&data.dates.length>0&&<>
       <div className="weekly-palms-source"><span>{data.month.slice(0,4)} 年 {Number(data.month.slice(5))} 月 · 已同步 {data.dates.length} 週：{data.dates.map(date=>`${Number(date.slice(5,7))}/${Number(date.slice(8))}`).join("、")}</span><span>上次擷取 {data.updatedAt?new Date(data.updatedAt).toLocaleString("zh-TW"):"—"}</span></div>
+      <div className="weekly-palms-monthly-actions"><button type="button" onClick={()=>void copyLeaders()} disabled={loading}>一鍵複製第一名</button><span role="status" aria-live="polite">{copyStatus}</span></div>
       <div className="weekly-palms-cards">
         <article className="panel"><small>來賓總數</small><b>{data.totals.visitors.toLocaleString("zh-TW")}<em>位</em></b><span>依當月已同步例會加總</span><p>第一名：{leader(data.members,row=>row.visitors,value=>`${value} 位`)}</p></article>
         <article className="panel"><small>提供引薦單（內＋外）</small><b>{(data.totals.inside+data.totals.outside).toLocaleString("zh-TW")}<em>張</em></b><span>內部 {data.totals.inside} · 外部 {data.totals.outside}</span><p>第一名：{leader(data.members,row=>row.inside+row.outside,value=>`${value} 張`)}</p></article>
