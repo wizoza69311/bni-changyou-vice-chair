@@ -204,7 +204,7 @@ const worker = {
             await env.DB.prepare(`INSERT INTO bni_sync_runner (id,last_seen_at) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET last_seen_at=excluded.last_seen_at`).bind(lastSeenAt).run();
             const status=await response.json() as Record<string,unknown>;
             if(status.state==="success"||status.state==="failed"){
-              const result=(status.result||{}) as Record<string,unknown>,completedAt=String(status.completedAt||lastSeenAt),attendanceCount=Number(result.attendanceCount??result.count??0),weeklyCount=Number(result.weeklyReportCount||0),message=status.state==="success"?`會員主檔 ${Number(result.memberCount||0)} 位、續約 ${Number(result.renewalCount||0)} 位、PALMS ${attendanceCount} 筆${weeklyCount?`、每週會務數據 ${weeklyCount} 週`:""}已更新`:String(status.error||"雲端同步失敗");
+              const result=(status.result||{}) as Record<string,unknown>,completedAt=String(status.completedAt||lastSeenAt),attendanceCount=Number(result.attendanceCount??result.count??0),weeklyCount=Number(result.weeklyReportCount||0),guestCount=Number(result.guestInvitationCount||0),message=status.state==="success"?`會員主檔 ${Number(result.memberCount||0)} 位、續約 ${Number(result.renewalCount||0)} 位、PALMS ${attendanceCount} 筆${weeklyCount?`、每週會務數據 ${weeklyCount} 週`:""}已更新；年度來賓${guestCount?`${guestCount} 位會員已核對`:"待同步"}`:String(status.error||"雲端同步失敗");
               await env.DB.prepare(`INSERT INTO bni_sync_job (id,state,requested_at,started_at,completed_at,message) VALUES (1,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,started_at=excluded.started_at,completed_at=excluded.completed_at,message=excluded.message`).bind(String(status.state),String(status.startedAt||completedAt),String(status.startedAt||completedAt),completedAt,message).run();
               await env.DB.prepare(`INSERT INTO bni_sync_run (id,state,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at`).bind(String(status.state),completedAt).run();
               job=await env.DB.prepare(`SELECT state,requested_at AS requestedAt,started_at AS startedAt,completed_at AS completedAt,message FROM bni_sync_job WHERE id=1`).first<Record<string,unknown>>();
@@ -367,6 +367,7 @@ const worker = {
       const runnerAuthorized=Boolean(env.BNI_RUNNER_TOKEN&&bearer===env.BNI_RUNNER_TOKEN);
       if(!runnerAuthorized&&(!bearer||!credential?.keyHash||digest!==credential.keyHash))return respond({error:"同步金鑰無效，請回管理系統重新配對"},401);
       const body=await request.json() as Record<string,unknown>,records=Array.isArray(body.records)?body.records:[],kpis=Array.isArray(body.kpis)?body.kpis:[],members=Array.isArray(body.members)?body.members.map(value=>String(value).trim()).filter(Boolean):[],renewalRows=Array.isArray(body.renewals)?body.renewals:[],failedMembers=Array.isArray(body.failedMembers)?body.failedMembers.map(value=>String(value).trim()).filter(Boolean):[],weeklyRows=Array.isArray(body.weeklyReports)?body.weeklyReports:[];
+      const guestReport=body.guestInvitations&&typeof body.guestInvitations==="object"?body.guestInvitations as Record<string,unknown>:null;
       const valid=records.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.date))&&["P","A","L","M","S"].includes(String(x.code))).map((x:any)=>({member:String(x.member).trim(),date:String(x.date),code:String(x.code)}));
       const validKpis=kpis.filter((x:any)=>x&&typeof x.member==="string"&&String(x.member).trim()&&[x.trainingPoints,x.visitorCount,x.oneToOneWeeklyAverage,x.referralWeeklyAverage,x.referralTotal,x.dreamReferralAmount].every(value=>Number.isFinite(Number(value))&&Number(value)>=0)).map((x:any)=>({member:String(x.member).trim(),trainingPoints:Math.round(Number(x.trainingPoints)),visitorCount:Math.round(Number(x.visitorCount)),oneToOneWeeklyAverage:Number(x.oneToOneWeeklyAverage),referralWeeklyAverage:Number(x.referralWeeklyAverage),referralTotal:Math.round(Number(x.referralTotal)),dreamReferralAmount:Math.round(Number(x.dreamReferralAmount))}));
       const validMembers=Array.from(new Set(members.map(value=>String(value).replace(/\s+/g,"")).filter(value=>value.length>=2&&bniNormalize(value)!=="提供"))),validRenewals=renewalRows.filter((x:any)=>x&&typeof x.member==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(String(x.expiryDate))).map((x:any)=>({member:String(x.member).trim(),expiryDate:String(x.expiryDate)}));
@@ -378,6 +379,16 @@ const worker = {
       if(validMembers.length>=10){
         await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_roster_state (id INTEGER PRIMARY KEY CHECK (id=1), members TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
         await env.DB.prepare(`INSERT INTO member_roster_state (id,members,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET members=excluded.members,updated_at=excluded.updated_at`).bind(JSON.stringify(validMembers),now).run();
+      }
+      let guestInvitationCount=0;
+      if(guestReport){
+        const periodStart=String(guestReport.periodStart||""),periodEnd=String(guestReport.periodEnd||""),rows=Array.isArray(guestReport.members)?guestReport.members:[];
+        const normalized=rows.filter((item):item is Record<string,unknown>=>Boolean(item&&typeof item==="object"&&typeof (item as Record<string,unknown>).member==="string"));
+        const names=new Set(normalized.map(item=>bniNormalize(item.member)));
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(periodStart)||!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)||periodStart>periodEnd||rows.length<10||rows.length>200||normalized.length!==rows.length||names.size!==rows.length||normalized.some(item=>!Number.isSafeInteger(item.count)||Number(item.count)<0||Number(item.count)>1000))return respond({error:"年度來賓資料格式異常，未更新任何資料"},400);
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_guest_invitation_state (id INTEGER PRIMARY KEY CHECK (id=1), report TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+        await env.DB.prepare(`INSERT INTO member_guest_invitation_state (id,report,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET report=excluded.report,updated_at=excluded.updated_at`).bind(JSON.stringify({periodStart,periodEnd,source:"BNI 分會 PALMS 年度彙總",members:normalized.map(item=>({member:String(item.member).trim(),count:Number(item.count)}))}),now).run();
+        guestInvitationCount=normalized.length;
       }
       if(validRenewals.length){
         await env.DB.prepare(`CREATE TABLE IF NOT EXISTS practice_state (id INTEGER PRIMARY KEY CHECK (id=1), renewals TEXT NOT NULL DEFAULT '[]', tasks TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`).run();
@@ -407,10 +418,10 @@ const worker = {
         await env.DB.prepare(`INSERT INTO weekly_palms_reports (meeting_date,summary,audit,updated_at) VALUES (?,?,?,?) ON CONFLICT(meeting_date) DO UPDATE SET summary=excluded.summary,audit=excluded.audit,updated_at=excluded.updated_at`).bind(meetingDate,JSON.stringify({totals,members:membersForWeek,source:"BNI 分會 PALMS"}),JSON.stringify(audit),now).run();
         weeklyReportCount++;
       }
-      const latestAttendanceDate=unique.map(item=>item.date).sort().at(-1)||"",syncStatus={lastSyncAt:now,attendance:{updatedAt:unique.length?now:null,count:unique.length,latestDate:latestAttendanceDate},members:{updatedAt:validMembers.length>=10?now:null,count:validMembers.length},renewals:{updatedAt:validRenewals.length?now:null,count:validRenewals.length},kpis:{updatedAt:uniqueKpis.length?now:null,count:uniqueKpis.length},failedMembers:failedMembers.length};
+      const latestAttendanceDate=unique.map(item=>item.date).sort().at(-1)||"",syncStatus={lastSyncAt:now,attendance:{updatedAt:unique.length?now:null,count:unique.length,latestDate:latestAttendanceDate},members:{updatedAt:validMembers.length>=10?now:null,count:validMembers.length},renewals:{updatedAt:validRenewals.length?now:null,count:validRenewals.length},kpis:{updatedAt:uniqueKpis.length?now:null,count:uniqueKpis.length},guestInvitations:{updatedAt:guestInvitationCount?now:null,count:guestInvitationCount},failedMembers:failedMembers.length};
       await env.DB.prepare(`CREATE TABLE IF NOT EXISTS bni_sync_status (id INTEGER PRIMARY KEY CHECK (id=1), status TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL)`).run();
       await env.DB.prepare(`INSERT INTO bni_sync_status (id,status,updated_at) VALUES (1,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(JSON.stringify(syncStatus),now).run();
-      return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,memberCount:validMembers.length,renewalCount:validRenewals.length,weeklyReportCount,updatedAt:now});
+      return respond({ok:true,count:unique.length,kpiCount:uniqueKpis.length,memberCount:validMembers.length,renewalCount:validRenewals.length,weeklyReportCount,guestInvitationCount,updatedAt:now});
     }
 
     if(url.pathname==="/api/bni-sync/status"&&request.method==="GET"){
@@ -429,6 +440,13 @@ const worker = {
       const row=await env.DB.prepare(`SELECT members,updated_at AS updatedAt FROM member_roster_state WHERE id=1`).first<{members:string;updatedAt:string}>();
       const members=(JSON.parse(row?.members||"[]") as string[]).filter(member=>bniNormalize(member)!=="提供");
       return apiJson({members,updatedAt:row?.updatedAt||null});
+    }
+
+    if(url.pathname==="/api/member-guest-invitations"&&request.method==="GET"){
+      if(!env.DB)return apiJson({report:null,updatedAt:null});
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS member_guest_invitation_state (id INTEGER PRIMARY KEY CHECK (id=1), report TEXT NOT NULL, updated_at TEXT NOT NULL)`).run();
+      const row=await env.DB.prepare(`SELECT report,updated_at AS updatedAt FROM member_guest_invitation_state WHERE id=1`).first<{report:string;updatedAt:string}>();
+      return apiJson({report:row?JSON.parse(row.report):null,updatedAt:row?.updatedAt||null});
     }
 
     if(url.pathname==="/api-docs/groups"){

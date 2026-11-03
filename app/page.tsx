@@ -49,6 +49,7 @@ type Renewal = {
   note: string;
   updatedAt?:string;
 };
+type GuestInvitationReport = { periodStart:string; periodEnd:string; source:string; members:{member:string;count:number}[] };
 type Task = {
   id: number;
   title: string;
@@ -438,6 +439,7 @@ export default function Home() {
     [dutySchedules,setDutySchedules]=useState<AdminDutySchedule[]>(seedDutySchedules),
     [careAssignments,setCareAssignments]=useState<CareAssignment[]>([]),
     [memberKpis,setMemberKpis]=useState<MemberKpi[]>([]),
+    [guestInvitationReport,setGuestInvitationReport]=useState<GuestInvitationReport|null>(null),
     [activeMemberNames,setActiveMemberNames]=useState<Set<string>>(seedActiveMemberNames),
     [syncedRosterNames,setSyncedRosterNames]=useState<Set<string>|null>(null),
     [draggedMember,setDraggedMember]=useState(""),
@@ -538,6 +540,7 @@ export default function Home() {
     fetch("/api/group-directory").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.groups)&&data.groups.length===12)setMemberGroups(data.groups)}).catch(()=>{});
     fetch("/api/member-care-owners").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.assignments))setCareAssignments(data.assignments)}).catch(()=>{});
     fetch("/api/member-kpis").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.records))setMemberKpis(data.records)}).catch(()=>{});
+    fetch("/api/member-guest-invitations").then(r=>r.ok?r.json():null).then(data=>{if(data?.report&&Array.isArray(data.report.members))setGuestInvitationReport(data.report)}).catch(()=>{});
     fetch("/api/member-roster").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.members)&&data.members.length>=10){const roster=new Set<string>(data.members.map((name:string)=>normalizeMemberName(name)));setSyncedRosterNames(roster);setActiveMemberNames(roster)}}).catch(()=>{});
     fetch("/api/attendance-alert-acks").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.acknowledgements))setAcknowledgedAttendanceAlerts(data.acknowledgements)}).catch(()=>{});
     fetch("/api/letter-notifications").then(r=>r.ok?r.json():null).then(data=>{if(Array.isArray(data?.notifications))setLetterNotifications(data.notifications)}).catch(()=>{});
@@ -1459,6 +1462,7 @@ export default function Home() {
               <div className="history-admin-bar">
                 {adminStatus?.isOwner ? <span>管理員模式：可刪除紀錄</span> : <><span>只有完整權限管理員可刪除會議紀錄</span><a href="/signin-with-chatgpt?return_to=/?admin=1">管理員登入</a></>}
               </div>
+              <p className="renewal-guest-period">近一年來賓邀約：{guestInvitationReport?`${fmt(guestInvitationReport.periodStart)} 至 ${fmt(guestInvitationReport.periodEnd)}，依 Connect 分會 PALMS 統計`:'年度報表尚未同步，暫不判定有無邀約'}</p>
               {renewalGroups.map((group) => {
                 const d = new Date(`${group.date}T00:00:00`);
                 return (
@@ -1484,6 +1488,7 @@ export default function Home() {
                               </small>
                             </div>
                           </div>
+                          {(()=>{const item=guestInvitationReport?.members.find(item=>normalizeMemberName(item.member)===normalizeMemberName(r.name));return <div className={`renewal-guest-status ${item?(item.count>0?"has-guests":"no-guests"):"unknown"}`} title={guestInvitationReport?.source||"年度報表尚未同步"}><span>近一年邀約來賓</span><strong>{item?item.count>0?`有 · ${item.count} 人次`:`無 · 0 人次`:guestInvitationReport?"待核對":"待同步"}</strong></div>})()}
                           <label>
                             <span>訪談委員</span>
                             <select

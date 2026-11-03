@@ -1,6 +1,7 @@
 import http from "node:http";
 import { chromium } from "playwright";
 import { parseChapterAudit, parseChapterSummary } from "./palms-report.mjs";
+import { parseYearlyVisitors } from "./yearly-visitors.mjs";
 
 const required = [
   "BNI_USERNAME",
@@ -399,6 +400,25 @@ async function sync() {
           .filter((record) => record.member)
           .map((record) => [`${normalize(record.member)}|${record.date}`, record]),
       );
+    const visitorPeriodStart = new Date(end.getFullYear() - 1, end.getMonth(), end.getDate() + 1);
+    let guestInvitations = null;
+    try {
+      const annualParams = new URLSearchParams(capturedParams);
+      annualParams.set("menuName", "menu.reports.chapter.palms.summary");
+      annualParams.set("startDate", us(visitorPeriodStart));
+      annualParams.set("endDate", us(end));
+      annualParams.set("ReportType", "EXCEL");
+      const response = await context.request.get(`https://api.bniconnectglobal.com/reports-api/reports/v1/generate?${annualParams}`, { headers, timeout: 90000 });
+      if (!response.ok()) throw Error(`年度 PALMS 報表讀取失敗（${response.status()}）`);
+      guestInvitations = {
+        periodStart: visitorPeriodStart.toISOString().slice(0, 10),
+        periodEnd: end.toISOString().slice(0, 10),
+        source: "BNI 分會 PALMS 年度彙總",
+        members: parseYearlyVisitors(await response.text(), rosterMembers),
+      };
+    } catch (error) {
+      console.warn("Yearly guest invitations unavailable:", error instanceof Error ? error.message : String(error));
+    }
     // The aggregate attendance export can lag behind a completed meeting. Reconcile
     // the recent completed chapter PALMS reports before replacing site data.
     const completedMeetings = await completedChapterPalms(page, chapter, recentMeetingStart(end));
@@ -436,7 +456,7 @@ async function sync() {
             Authorization: `Bearer ${process.env.BNI_RUNNER_TOKEN}`,
             "Content-Type": "application/json",
           },
-          data: { members, records, renewals, weeklyReports },
+          data: { members, records, renewals, weeklyReports, guestInvitations },
         },
       ),
       result = await upload.json();
@@ -448,6 +468,7 @@ async function sync() {
       latestDate: latestRecordDate,
       completedMeetingCount: completedMeetings.length,
       weeklyReportCount: weeklyReports.length,
+      guestInvitationCount: guestInvitations?.members.length || 0,
     };
   } finally {
     await browser.close();
