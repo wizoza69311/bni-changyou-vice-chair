@@ -1462,7 +1462,7 @@ export default function Home() {
               <div className="history-admin-bar">
                 {adminStatus?.isOwner ? <span>管理員模式：可刪除紀錄</span> : <><span>只有完整權限管理員可刪除會議紀錄</span><a href="/signin-with-chatgpt?return_to=/?admin=1">管理員登入</a></>}
               </div>
-              <p className="renewal-guest-period">近一年來賓邀約：{guestInvitationReport?`${fmt(guestInvitationReport.periodStart)} 至 ${fmt(guestInvitationReport.periodEnd)}，依 Connect 分會 PALMS 統計`:'年度報表尚未同步，暫不判定有無邀約'}</p>
+              <p className="renewal-guest-period">近一年來賓邀約：{guestInvitationReport?`${guestInvitationReport.periodStart.replaceAll("-","/")} 至 ${guestInvitationReport.periodEnd.replaceAll("-","/")}，依 Connect 分會 PALMS 統計`:'年度報表尚未同步，暫不判定有無邀約'}</p>
               {renewalGroups.map((group) => {
                 const d = new Date(`${group.date}T00:00:00`);
                 return (
