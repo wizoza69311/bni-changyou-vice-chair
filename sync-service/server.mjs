@@ -173,7 +173,9 @@ function findId(source, key) {
 const us = (d) =>
   `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
 function recentMeetingStart(end) {
-  const date = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 42);
+  // Keep enough completed meetings to backfill the first week of the previous
+  // two months; otherwise a monthly leader can be calculated from partial data.
+  const date = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 70);
   while (date.getDay() !== 4) date.setDate(date.getDate() - 1);
   return date;
 }
