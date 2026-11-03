@@ -4,5 +4,6 @@ COPY package.json ./
 RUN npm install --omit=dev
 COPY server.mjs ./
 COPY palms-report.mjs ./
+COPY yearly-visitors.mjs ./
 ENV PORT=10000
 CMD ["npm","start"]
