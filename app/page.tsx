@@ -357,6 +357,12 @@ const seedDutySchedules:AdminDutySchedule[]=[
   {date:"2026-10-22",policy:"張博凱",whiteboard1:"王世品",whiteboard2:"黃麟翔",referralReport:"李坊祥",committeeRecord:"余博軒",host:"連育正"},
   {date:"2026-10-29",policy:"林佩佩",whiteboard1:"楊嘉慧",whiteboard2:"游姿菱",referralReport:"康清智",committeeRecord:"田慶堂",host:"張博凱"},
 ];
+function emptyDutySchedule(date:string):AdminDutySchedule{return{date,policy:"",whiteboard1:"",whiteboard2:"",referralReport:"",committeeRecord:"",host:""}}
+function upcomingDutyDates(todayKey:string){
+  const start=Date.parse(`${todayKey}T12:00:00+08:00`);
+  const daysUntilThursday=(4-new Date(start).getUTCDay()+7)%7;
+  return Array.from({length:8},(_,index)=>taipeiDateKey(new Date(start+(daysUntilThursday+index*7)*86400000)));
+}
 // Synced from BNI Connect's current chapter roster report on 2026-08-30.
 const seedActiveMemberNames=new Set(["王世品","賴丰培","蔡伊鎔","林佩佩","楊佳昇","陳依凡","侯冠瑋","盧冠臻","戴劭哲","黃勇嘉","張博凱","余博軒","曹原彰","黃同慶","楊和宥","林品彤","楊嘉慧","許國祥","李坊祥","鍾坤宏","葉奕廷","蘇姮勻","陳姵文","游姿菱","馮威憲","張婉靖","廖婕詠","周子嵐","莊子樂","王孟哲","呂孟翰","林宏一","林宗翰","林定豪","陳宜信","謝宥騏","林家蔚","劉宸緯","熊庭逸","潘建勳","陳建安","黃建華","林思裴","李恩誠","曾惠君","廖愷伶","丁慶儒","田慶堂","王懿德","鍾承翰","洪敏智","林文裕","雷文鳳","吳旌緯","蔡昕宏","陳春長","林昱璋","李曉玫","周曜贊","吳書林","陳朝銘","江柏陞","周榆璇","陳沛慈","康清智","彭澤偉","呂炘豪","翁煜宸","郭玉琴","黃瑀珍","蔡瑋倫","陳睿民","潘祥鈞","廖筱蘭","曾紹恩","張綺耘","劉美葳","洪翊嘉","連育正","陳芷綺","黃莞芹","葉蕥霈","陳薏如","梁虔駖","林詠淇","黃鈺淳","劉雍致","周順智","林駿維","黃麗娟","黃麟翔","賴伸泰"]);
 const extraGroupMemberNames=["謝沂庭","鄭閔中","賴伸泰"];
@@ -594,7 +600,11 @@ export default function Home() {
   const terminalRenewalStatuses:Status[]=["已完成","預計離會","已離會"];
   const stoppedRenewals=renewals.filter((renewal)=>renewal.status==="預計離會"||renewal.status==="已離會");
   const todayKey=taipeiDateKey();
-  const visibleDutySchedules=useMemo(()=>dutySchedules.filter(row=>row.date>=todayKey).sort((a,b)=>a.date.localeCompare(b.date)),[dutySchedules,todayKey]);
+  const visibleDutySchedules=useMemo(()=>{
+    const schedules=new Map(dutySchedules.filter(row=>row.date>=todayKey).map(row=>[row.date,row]));
+    upcomingDutyDates(todayKey).forEach(date=>{if(!schedules.has(date))schedules.set(date,emptyDutySchedule(date))});
+    return [...schedules.values()].sort((a,b)=>a.date.localeCompare(b.date));
+  },[dutySchedules,todayKey]);
   const connectSyncAgeDays=connectSyncStatus?.lastSyncAt?Math.floor((Date.now()-new Date(connectSyncStatus.lastSyncAt).getTime())/86400000):null;
   const connectSyncHealth=!connectSyncStatus?"empty":connectSyncStatus.failedMembers>0||attendanceHealth.status==="incomplete"?"error":connectSyncAgeDays!==null&&connectSyncAgeDays>7||attendanceHealth.status==="waiting"?"stale":"ready";
   const memberWindow=useMemo(()=>{const end=new Date(`${todayKey}T12:00:00+08:00`),start=new Date(end.getFullYear(),end.getMonth()-5,1);return{start:taipeiDateKey(start),end:todayKey}},[todayKey]);
@@ -944,7 +954,7 @@ export default function Home() {
   async function importAttendance(){if(!attendancePreview){flash("請先產生差異預覽");return}try{const response=await fetch("/api/attendance-records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({records:attendancePreview.records,baseUpdatedAt:attendanceUpdatedAt})});const data=await response.json();if(response.status===409){setAttendanceRecords(data.records||[]);setAttendanceUpdatedAt(data.updatedAt||"");setAttendancePreview(null);flash("PALMS 已被另一個畫面更新，已載入最新版本，請重新預覽");return}if(!response.ok)throw new Error(data.error||"匯入失敗");setAttendanceRecords(data.records||[]);setAttendanceUpdatedAt(data.updatedAt||"");setAttendanceImportDraft("");setAttendancePreview(null);flash(`已同步 ${data.records?.length||0} 筆 PALMS 紀錄`)}catch(error){flash(error instanceof Error?error.message:"匯入失敗")}}
   async function saveAttendanceConversions(next:AttendanceConversion[]){try{const response=await fetch("/api/attendance-conversions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({conversions:next})}),data=await response.json();if(!response.ok)throw new Error(data.error||"折算註記儲存失敗");setAttendanceConversions(data.conversions||next);setConversionDraft(null);flash("遲到折算註記已儲存")}catch(error){flash(error instanceof Error?error.message:"折算註記儲存失敗")}}
   function openAttendanceConversion(member:string,convertedDate:string){const existing=attendanceConversions.find(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate),used=new Set(attendanceConversions.filter(item=>!(normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate)).map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`)),candidates=attendanceRecords.filter(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.code==="L"&&item.date<convertedDate&&!used.has(`${normalizeMemberName(member)}|${item.date}`)).sort((a,b)=>b.date.localeCompare(a.date));setConversionDraft({member,convertedDate,pairedLateDate:existing?.pairedLateDate||candidates[0]?.date||""})}
-  async function updateDuty(date:string,key:Exclude<keyof AdminDutySchedule,"date">,value:string){const next=dutySchedules.map(row=>row.date===date?{...row,[key]:value}:row);setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(!response.ok){flash("行政排班儲存失敗，請稍後重試");return}flash("行政排班已儲存")}
+  async function updateDuty(date:string,key:Exclude<keyof AdminDutySchedule,"date">,value:string){const next=dutySchedules.some(row=>row.date===date)?dutySchedules.map(row=>row.date===date?{...row,[key]:value}:row):[...dutySchedules,{...emptyDutySchedule(date),[key]:value}];setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(!response.ok){flash("行政排班儲存失敗，請稍後重試");return}flash("行政排班已儲存")}
   async function generateDutyAssignmentText(date:string,text:string){setShowDutyAssignmentDate(date);try{await navigator.clipboard.writeText(text);flash("當週工作與委員名單已產生並複製")}catch{flash("名單已產生，請從下方文字框複製")}}
   async function clearDutyForCloser(date:string,owner:string){let removed=false;const next=dutySchedules.map(row=>{if(row.date!==date)return row;const updated={...row};dutyFields.forEach(field=>{if(updated[field.key]===owner){updated[field.key]="";removed=true}});return updated});if(!removed)return;setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(response.ok)flash(`${owner} 已安排來賓締結，該週行政職務已自動移除`)}
 
