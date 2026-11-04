@@ -23,3 +23,4 @@
 }
 
 @media(max-width:390px){.unassigned-pool>div{grid-template-columns:1fr}}
+.group-pending-swearing{margin-left:auto;padding:3px 5px;border-radius:4px;background:#fff3d6;color:#8a610d;font-size:9px;white-space:nowrap}
