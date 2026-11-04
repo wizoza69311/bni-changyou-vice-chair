@@ -443,6 +443,7 @@ export default function Home() {
     [qualityCases,setQualityCases]=useState<QualityCase[]>([]),
     [memberGroups,setMemberGroups]=useState<MemberGroup[]>(seedMemberGroups),
     [dutySchedules,setDutySchedules]=useState<AdminDutySchedule[]>(seedDutySchedules),
+    [isDutyAutoAssigning,setIsDutyAutoAssigning]=useState(false),
     [careAssignments,setCareAssignments]=useState<CareAssignment[]>([]),
     [memberKpis,setMemberKpis]=useState<MemberKpi[]>([]),
     [guestInvitationReport,setGuestInvitationReport]=useState<GuestInvitationReport|null>(null),
@@ -955,6 +956,53 @@ export default function Home() {
   async function saveAttendanceConversions(next:AttendanceConversion[]){try{const response=await fetch("/api/attendance-conversions",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({conversions:next})}),data=await response.json();if(!response.ok)throw new Error(data.error||"折算註記儲存失敗");setAttendanceConversions(data.conversions||next);setConversionDraft(null);flash("遲到折算註記已儲存")}catch(error){flash(error instanceof Error?error.message:"折算註記儲存失敗")}}
   function openAttendanceConversion(member:string,convertedDate:string){const existing=attendanceConversions.find(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate),used=new Set(attendanceConversions.filter(item=>!(normalizeMemberName(item.member)===normalizeMemberName(member)&&item.convertedDate===convertedDate)).map(item=>`${normalizeMemberName(item.member)}|${item.pairedLateDate}`)),candidates=attendanceRecords.filter(item=>normalizeMemberName(item.member)===normalizeMemberName(member)&&item.code==="L"&&item.date<convertedDate&&!used.has(`${normalizeMemberName(member)}|${item.date}`)).sort((a,b)=>b.date.localeCompare(a.date));setConversionDraft({member,convertedDate,pairedLateDate:existing?.pairedLateDate||candidates[0]?.date||""})}
   async function updateDuty(date:string,key:Exclude<keyof AdminDutySchedule,"date">,value:string){const next=dutySchedules.some(row=>row.date===date)?dutySchedules.map(row=>row.date===date?{...row,[key]:value}:row):[...dutySchedules,{...emptyDutySchedule(date),[key]:value}];setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(!response.ok){flash("行政排班儲存失敗，請稍後重試");return}flash("行政排班已儲存")}
+  async function autoAssignDuties(){
+    if(isDutyAutoAssigning)return;
+    setIsDutyAutoAssigning(true);
+    const next=dutySchedules.map(row=>({...row}));
+    for(const row of visibleDutySchedules)if(!next.some(existing=>existing.date===row.date))next.push({...row});
+    const fields:[Exclude<keyof AdminDutySchedule,"date">,...Exclude<keyof AdminDutySchedule,"date">[]]=["host","committeeRecord","referralReport","policy","whiteboard1","whiteboard2"];
+    const totalCount=new Map(dutyCommitteeMembers.map(member=>[member,0]));
+    const roleCount=new Map<string,number>();
+    const lastAssigned=new Map<string,string>();
+    const lastRoleAssigned=new Map<string,string>();
+    const roleFamily=(key:Exclude<keyof AdminDutySchedule,"date">)=>key.startsWith("whiteboard")?"whiteboard":key;
+    for(const row of next){for(const field of dutyFields){const member=row[field.key];if(!member)continue;totalCount.set(member,(totalCount.get(member)||0)+1);const roleKey=`${member}|${roleFamily(field.key)}`;roleCount.set(roleKey,(roleCount.get(roleKey)||0)+1);const last=lastAssigned.get(member),lastRole=lastRoleAssigned.get(roleKey);if(row.date<todayKey){if(!last||last<row.date)lastAssigned.set(member,row.date);if(!lastRole||lastRole<row.date)lastRoleAssigned.set(roleKey,row.date)}}}
+    let added=0;
+    for(const [weekIndex,row] of next.filter(item=>item.date>=todayKey).sort((a,b)=>a.date.localeCompare(b.date)).entries()){
+      const closers=new Set(visitors.filter(visitor=>visitor.visitDate===row.date&&visitor.owner&&visitor.stage!=="不追蹤"&&visitor.stage!=="已入會").map(visitor=>visitor.owner));
+      const used=new Set(dutyFields.map(field=>row[field.key]).filter(Boolean));
+      for(const [roleIndex,key] of fields.entries()){
+        if(row[key])continue;
+        const candidates=dutyCommitteeMembers.filter(member=>!used.has(member)&&!closers.has(member));
+        candidates.sort((a,b)=>{
+          const score=(member:string)=>{
+            const previous=lastAssigned.get(member);
+            const weeksSincePrevious=previous?Math.round((Date.parse(row.date)-Date.parse(previous))/604800000):99;
+            const roleKey=`${member}|${roleFamily(key)}`,previousRole=lastRoleAssigned.get(roleKey);
+            const weeksSinceRole=previousRole?Math.round((Date.parse(row.date)-Date.parse(previousRole))/604800000):99;
+            const recency=weeksSincePrevious===1?120:weeksSincePrevious===2?25:0;
+            const sameRoleRecency=weeksSinceRole===1?90:weeksSinceRole===2?30:0;
+            return (totalCount.get(member)||0)*100+(roleCount.get(roleKey)||0)*30+recency+sameRoleRecency;
+          };
+          return score(a)-score(b)||((dutyCommitteeMembers.indexOf(a)-weekIndex*6-roleIndex+120)%12)-((dutyCommitteeMembers.indexOf(b)-weekIndex*6-roleIndex+120)%12);
+        });
+        const member=candidates[0];
+        if(!member)continue;
+        row[key]=member;used.add(member);added++;
+        totalCount.set(member,(totalCount.get(member)||0)+1);
+        const roleKey=`${member}|${roleFamily(key)}`;roleCount.set(roleKey,(roleCount.get(roleKey)||0)+1);lastRoleAssigned.set(roleKey,row.date);
+      }
+      for(const member of used)lastAssigned.set(member,row.date);
+    }
+    if(!added){setIsDutyAutoAssigning(false);flash("目前沒有待安排的行政職務");return}
+    try{
+      const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});
+      if(!response.ok)throw new Error("儲存失敗");
+      setDutySchedules(next);flash(`已公平預排 ${added} 項行政職務，可逐項調整`);
+    }catch{flash("行政排班儲存失敗，原班表未變更")}
+    finally{setIsDutyAutoAssigning(false)}
+  }
   async function generateDutyAssignmentText(date:string,text:string){setShowDutyAssignmentDate(date);try{await navigator.clipboard.writeText(text);flash("當週工作與委員名單已產生並複製")}catch{flash("名單已產生，請從下方文字框複製")}}
   async function clearDutyForCloser(date:string,owner:string){let removed=false;const next=dutySchedules.map(row=>{if(row.date!==date)return row;const updated={...row};dutyFields.forEach(field=>{if(updated[field.key]===owner){updated[field.key]="";removed=true}});return updated});if(!removed)return;setDutySchedules(next);const response=await fetch("/api/admin-schedules",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({schedules:next})});if(response.ok)flash(`${owner} 已安排來賓締結，該週行政職務已自動移除`)}
 
@@ -1628,7 +1676,7 @@ export default function Home() {
           {view === "schedules" && (
             <section className="duty-page">
               <div className="renewal-summary"><div><span>06</span><h3>例會行政排班</h3><p>最上方為當週班表，已過日期會自動隱藏</p></div><strong>{visibleDutySchedules.length}<small>待執行週次</small></strong></div>
-              <section className="duty-notice panel"><div><b>排班原則</b><small>締結優先、同週不重複；同一職務由未做過或次數較少者優先</small></div>{!adminStatus?.isOwner&&<span>目前為檢視模式</span>}</section>
+              <section className="duty-notice panel"><div><b>排班原則</b><small>締結優先、同週不重複；先看總輪值次數，再平衡各職務。已安排的人選會保留。</small></div>{adminStatus?.isOwner?<button type="button" onClick={autoAssignDuties} disabled={isDutyAutoAssigning||!visibleDutySchedules.some(row=>dutyFields.some(field=>!row[field.key]))}>{isDutyAutoAssigning?"正在預排…":"依公平原則預排"}</button>:<span>目前為檢視模式</span>}</section>
               <details className="panel duty-stats"><summary><b>輪值統計</b><span>展開查看公平性</span></summary><div>{dutyCommitteeMembers.map(member=><article key={member}><b>{member}</b><span>總計 {dutyFields.reduce((sum,field)=>sum+dutySchedules.filter(row=>row[field.key]===member).length,0)} 次</span>{dutyFields.map(field=><small key={field.key}>{field.label} {dutySchedules.filter(row=>row[field.key]===member).length}</small>)}</article>)}</div></details>
               <section className="duty-week-list">
                 {visibleDutySchedules.length ? visibleDutySchedules.map((row,index)=>{

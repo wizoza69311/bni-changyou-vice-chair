@@ -3,6 +3,8 @@
 .duty-notice div { display: grid; gap: 4px; }
 .duty-notice small { color: #777067; font-size: 13px; }
 .duty-notice > span { padding: 7px 11px; border-radius: 999px; background: #f1eee9; color: #70685f; font-size: 13px; font-weight: 700; }
+.duty-notice > button { flex: none; padding: 10px 16px; border: 0; border-radius: 9px; background: #b7192b; color: #fff; font-size: 13px; font-weight: 800; cursor: pointer; }
+.duty-notice > button:disabled { opacity: .55; cursor: default; }
 .duty-week-list { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .duty-week { overflow: hidden; }
 .duty-week > header { position: static; height: auto; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: #f8f5ef; border-bottom: 1px solid #e8e1d7; }
@@ -35,4 +37,4 @@
 .duty-stats article small { grid-column: 1/-1; color: #777067; font-size: 12px; }
 @media(max-width:900px){.duty-week>div{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:900px){.duty-stats>div{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:600px){.duty-notice{align-items:flex-start}.duty-week>div,.duty-stats>div{grid-template-columns:1fr}.duty-week label{gap:6px;border-right:0}.duty-week>header{align-items:flex-start}.duty-week>header div{display:grid}.duty-week select{font-size:16px}}
+@media(max-width:600px){.duty-notice{align-items:stretch;flex-direction:column}.duty-week>div,.duty-stats>div{grid-template-columns:1fr}.duty-week label{gap:6px;border-right:0}.duty-week>header{align-items:flex-start}.duty-week>header div{display:grid}.duty-week select{font-size:16px}}
